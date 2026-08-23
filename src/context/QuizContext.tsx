@@ -1,6 +1,18 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  orderBy,
+  getDocs,
+  writeBatch
+} from 'firebase/firestore';
+import { db, ensureAuth } from '../lib/firebase';
 import { Quiz, Question, QuizPage, QuizSettings, QuizSubmission, QuestionType, OptionItem, AuthUser } from '../types/quiz';
-import { DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ, INITIAL_SUBMISSIONS } from '../data/defaultQuizzes';
+import { DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ } from '../data/defaultQuizzes';
 
 export const PRIMARY_INSTRUCTOR: AuthUser & { password: string } = {
   id: 'user-dosen-devin',
@@ -32,6 +44,7 @@ interface QuizContextType {
   appMode: 'admin' | 'taker';
   takingQuizId: string | null;
   currentUser: AuthUser | null;
+  isCloudSynced: boolean;
   
   // Auth Actions
   login: (email: string, password?: string) => boolean;
@@ -65,19 +78,17 @@ interface QuizContextType {
   reorderQuestions: (quizId: string, newQuestions: Question[]) => void;
   
   // Submissions
-  submitQuizResult: (submission: QuizSubmission) => void;
-  deleteSubmission: (submissionId: string) => void;
-  clearQuizSubmissions: (quizId: string) => void;
+  submitQuizResult: (submission: QuizSubmission) => Promise<void>;
+  deleteSubmission: (submissionId: string) => Promise<void>;
+  clearQuizSubmissions: (quizId: string) => Promise<void>;
   
   // Reset & Imports
   resetToDefaultData: () => void;
   importQuizJson: (jsonString: string) => boolean;
 }
 
-const STORAGE_KEY_QUIZZES = 'flexitest_quizzes_v1';
-const STORAGE_KEY_SUBMISSIONS = 'flexitest_submissions_real_v2';
+const STORAGE_KEY_QUIZZES = 'flexitest_quizzes_v2';
 const STORAGE_KEY_AUTH = 'flexitest_auth_user_v1';
-
 const DUMMY_SUBMISSION_IDS = new Set(['sub-1', 'sub-2', 'sub-3', 'sub-4', 'sub-5', 'sub-6']);
 
 const QuizContext = createContext<QuizContextType | undefined>(undefined);
@@ -107,27 +118,98 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return [DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ];
   });
 
-  const [submissions, setSubmissions] = useState<QuizSubmission[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
-      if (saved) {
-        const parsed: QuizSubmission[] = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.filter((s) => !DUMMY_SUBMISSION_IDS.has(s.id));
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load submissions from storage', e);
-    }
-    return INITIAL_SUBMISSIONS;
-  });
-
+  const [submissions, setSubmissions] = useState<QuizSubmission[]>([]);
   const [activeQuizId, setActiveQuizId] = useState<string>(DEFAULT_DATABASE_QUIZ.id);
   const [activeTab, setActiveTab] = useState<'create' | 'configure' | 'publish' | 'analyze' | 'preview'>('create');
   const [appMode, setAppMode] = useState<'admin' | 'taker'>('admin');
   const [takingQuizId, setTakingQuizId] = useState<string | null>(null);
+  const [isCloudSynced, setIsCloudSynced] = useState<boolean>(false);
 
-  // Sync to local storage
+  // Initialize Anonymous Firebase Auth
+  useEffect(() => {
+    ensureAuth();
+  }, []);
+
+  // Sync Submissions from Cloud Firestore in Real-time across all devices!
+  useEffect(() => {
+    const submissionsRef = collection(db, 'submissions');
+    const q = query(submissionsRef, orderBy('submittedAt', 'desc'));
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const cloudSubmissions: QuizSubmission[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as QuizSubmission;
+          if (data && !DUMMY_SUBMISSION_IDS.has(data.id)) {
+            cloudSubmissions.push(data);
+          }
+        });
+        setSubmissions(cloudSubmissions);
+        setIsCloudSynced(true);
+      },
+      (error) => {
+        console.error('Real-time submissions sync error:', error);
+        // Fallback gracefully to read collection directly if index sorting encounters issue
+        getDocs(submissionsRef).then((snap) => {
+          const fallbackList: QuizSubmission[] = [];
+          snap.forEach((d) => {
+            const data = d.data() as QuizSubmission;
+            if (data && !DUMMY_SUBMISSION_IDS.has(data.id)) {
+              fallbackList.push(data);
+            }
+          });
+          fallbackList.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+          setSubmissions(fallbackList);
+          setIsCloudSynced(true);
+        }).catch((err) => {
+          console.warn('Fallback submissions query failed:', err);
+        });
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  // Sync Quizzes from Cloud Firestore so quizzes created on one device appear everywhere
+  useEffect(() => {
+    const quizzesRef = collection(db, 'quizzes');
+    const unsubscribe = onSnapshot(
+      quizzesRef,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const cloudQuizzes: Quiz[] = [];
+          snapshot.forEach((docSnap) => {
+            const qData = docSnap.data() as Quiz;
+            if (qData && qData.id) {
+              cloudQuizzes.push(qData);
+            }
+          });
+          if (cloudQuizzes.length > 0) {
+            setQuizzes(cloudQuizzes);
+          }
+        } else {
+          // If Firestore quizzes collection is empty, seed initial default quizzes to cloud
+          const seedBatch = async () => {
+            try {
+              await setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), DEFAULT_DATABASE_QUIZ);
+              await setDoc(doc(db, 'quizzes', SAMPLE_MULTI_TYPE_QUIZ.id), SAMPLE_MULTI_TYPE_QUIZ);
+            } catch (err) {
+              console.warn('Error seeding default quizzes to Firestore:', err);
+            }
+          };
+          seedBatch();
+        }
+      },
+      (error) => {
+        console.warn('Quizzes sync warning:', error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  // Sync to local storage as fallback
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify(quizzes));
@@ -136,13 +218,14 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [quizzes]);
 
-  useEffect(() => {
+  // Helper to persist quiz update to Cloud Firestore
+  const persistQuizToCloud = async (quizToSave: Quiz) => {
     try {
-      localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(submissions));
+      await setDoc(doc(db, 'quizzes', quizToSave.id), quizToSave);
     } catch (e) {
-      console.error('Failed to save submissions', e);
+      console.warn('Could not persist quiz to Firestore:', e);
     }
-  }, [submissions]);
+  };
 
   const activeQuiz = quizzes.find((q) => q.id === activeQuizId) || quizzes[0];
 
@@ -210,24 +293,28 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setQuizzes((prev) => [newQuiz, ...prev]);
     setActiveQuizId(newId);
     setActiveTab('create');
+    persistQuizToCloud(newQuiz);
     return newId;
   };
 
   const updateQuizSettings = (quizId: string, settingsUpdate: Partial<QuizSettings>) => {
     setQuizzes((prev) =>
-      prev.map((q) =>
-        q.id === quizId
-          ? {
-              ...q,
-              updatedAt: new Date().toISOString(),
-              settings: { ...q.settings, ...settingsUpdate },
-            }
-          : q
-      )
+      prev.map((q) => {
+        if (q.id === quizId) {
+          const updated: Quiz = {
+            ...q,
+            updatedAt: new Date().toISOString(),
+            settings: { ...q.settings, ...settingsUpdate },
+          };
+          persistQuizToCloud(updated);
+          return updated;
+        }
+        return q;
+      })
     );
   };
 
-  const deleteQuiz = (quizId: string) => {
+  const deleteQuiz = async (quizId: string) => {
     if (quizzes.length <= 1) {
       return;
     }
@@ -238,6 +325,12 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       return filtered;
     });
+
+    try {
+      await deleteDoc(doc(db, 'quizzes', quizId));
+    } catch (e) {
+      console.warn('Error deleting quiz from cloud:', e);
+    }
   };
 
   const duplicateQuiz = (quizId: string) => {
@@ -257,6 +350,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     setQuizzes((prev) => [cloned, ...prev]);
     setActiveQuizId(newId);
+    persistQuizToCloud(cloned);
     return newId;
   };
 
@@ -271,11 +365,13 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
           title: title || `Halaman ${pageNum}`,
           description: '',
         };
-        return {
+        const updated: Quiz = {
           ...q,
           pages: [...q.pages, newPage],
           updatedAt: new Date().toISOString(),
         };
+        persistQuizToCloud(updated);
+        return updated;
       })
     );
   };
@@ -284,11 +380,13 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setQuizzes((prev) =>
       prev.map((q) => {
         if (q.id !== quizId) return q;
-        return {
+        const updated: Quiz = {
           ...q,
           pages: q.pages.map((p) => (p.id === pageId ? { ...p, ...data } : p)),
           updatedAt: new Date().toISOString(),
         };
+        persistQuizToCloud(updated);
+        return updated;
       })
     );
   };
@@ -304,12 +402,14 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const updatedQuestions = q.questions.map((qu) =>
           qu.pageId === pageId ? { ...qu, pageId: fallbackPageId } : qu
         );
-        return {
+        const updated: Quiz = {
           ...q,
           pages: remainingPages.map((p, idx) => ({ ...p, pageNumber: idx + 1 })),
           questions: updatedQuestions,
           updatedAt: new Date().toISOString(),
         };
+        persistQuizToCloud(updated);
+        return updated;
       })
     );
   };
@@ -355,11 +455,13 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setQuizzes((prev) =>
       prev.map((q) => {
         if (q.id !== quizId) return q;
-        return {
+        const updated: Quiz = {
           ...q,
           questions: [...q.questions, newQuestion],
           updatedAt: new Date().toISOString(),
         };
+        persistQuizToCloud(updated);
+        return updated;
       })
     );
 
@@ -370,11 +472,13 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setQuizzes((prev) =>
       prev.map((q) => {
         if (q.id !== quizId) return q;
-        return {
+        const updated: Quiz = {
           ...q,
           questions: q.questions.map((quest) => (quest.id === questionId ? { ...quest, ...data } : quest)),
           updatedAt: new Date().toISOString(),
         };
+        persistQuizToCloud(updated);
+        return updated;
       })
     );
   };
@@ -383,11 +487,13 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setQuizzes((prev) =>
       prev.map((q) => {
         if (q.id !== quizId) return q;
-        return {
+        const updated: Quiz = {
           ...q,
           questions: q.questions.filter((quest) => quest.id !== questionId),
           updatedAt: new Date().toISOString(),
         };
+        persistQuizToCloud(updated);
+        return updated;
       })
     );
   };
@@ -411,11 +517,13 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const index = q.questions.findIndex((quest) => quest.id === questionId);
         const newQuestions = [...q.questions];
         newQuestions.splice(index + 1, 0, clone);
-        return {
+        const updated: Quiz = {
           ...q,
           questions: newQuestions,
           updatedAt: new Date().toISOString(),
         };
+        persistQuizToCloud(updated);
+        return updated;
       })
     );
   };
@@ -434,11 +542,13 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const [moved] = newQuestions.splice(index, 1);
         newQuestions.splice(targetIndex, 0, moved);
 
-        return {
+        const updated: Quiz = {
           ...q,
           questions: newQuestions,
           updatedAt: new Date().toISOString(),
         };
+        persistQuizToCloud(updated);
+        return updated;
       })
     );
   };
@@ -447,25 +557,55 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setQuizzes((prev) =>
       prev.map((q) => {
         if (q.id !== quizId) return q;
-        return {
+        const updated: Quiz = {
           ...q,
           questions: newQuestions,
           updatedAt: new Date().toISOString(),
         };
+        persistQuizToCloud(updated);
+        return updated;
       })
     );
   };
 
-  const submitQuizResult = (submission: QuizSubmission) => {
-    setSubmissions((prev) => [submission, ...prev]);
+  // Submit Result directly to Firebase Cloud Firestore for instant cross-device synchronization
+  const submitQuizResult = async (submission: QuizSubmission) => {
+    // 1. Optimistic local update
+    setSubmissions((prev) => [submission, ...prev.filter((s) => s.id !== submission.id)]);
+
+    // 2. Persist to Firestore
+    try {
+      await ensureAuth();
+      const submissionDocRef = doc(db, 'submissions', submission.id);
+      await setDoc(submissionDocRef, submission);
+    } catch (err) {
+      console.error('Error submitting quiz result to Firebase Firestore:', err);
+    }
   };
 
-  const deleteSubmission = (submissionId: string) => {
+  const deleteSubmission = async (submissionId: string) => {
     setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
+    try {
+      await deleteDoc(doc(db, 'submissions', submissionId));
+    } catch (err) {
+      console.error('Error deleting submission from Firestore:', err);
+    }
   };
 
-  const clearQuizSubmissions = (quizId: string) => {
+  const clearQuizSubmissions = async (quizId: string) => {
+    const targetSubmissions = submissions.filter((s) => s.quizId === quizId);
     setSubmissions((prev) => prev.filter((s) => s.quizId !== quizId));
+
+    try {
+      const batch = writeBatch(db);
+      targetSubmissions.forEach((sub) => {
+        const ref = doc(db, 'submissions', sub.id);
+        batch.delete(ref);
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error('Error clearing quiz submissions from Firestore:', err);
+    }
   };
 
   // Sync auth to local storage
@@ -549,7 +689,6 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const resetToDefaultData = () => {
     setQuizzes([DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ]);
-    setSubmissions(INITIAL_SUBMISSIONS);
     setActiveQuizId(DEFAULT_DATABASE_QUIZ.id);
     setActiveTab('create');
   };
@@ -568,6 +707,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
         setQuizzes((prev) => [imported, ...prev]);
         setActiveQuizId(newId);
+        persistQuizToCloud(imported);
         return true;
       }
     } catch (err) {
@@ -587,6 +727,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         appMode,
         takingQuizId,
         currentUser,
+        isCloudSynced,
         login,
         registerUser,
         logout,

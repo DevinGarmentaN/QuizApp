@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Submissions collection - for student quiz results & real-time analytics
+    match /submissions/{submissionId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if true;
+    }
+
+    // Quizzes collection - for synced quiz configurations & questions
+    match /quizzes/{quizId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
