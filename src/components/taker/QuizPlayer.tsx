@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuiz } from '../../context/QuizContext';
 import { Quiz, Question, QuizSubmission, QuestionResult, RespondentInfo } from '../../types/quiz';
 import { QuizLeaderboard } from './QuizLeaderboard';
-import { doc, onSnapshot, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
 import { db, ensureAuth } from '../../lib/firebase';
+import { DEFAULT_DATABASE_QUIZ } from '../../data/defaultQuizzes';
 import confetti from 'canvas-confetti';
 import { 
   Clock, 
@@ -61,16 +62,27 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
         if (docSnap.exists()) {
           const data = docSnap.data() as Quiz;
           if (data && data.id) {
-            setCloudQuiz(data);
+            // Check if DEFAULT_DATABASE_QUIZ needs to be updated to 25 questions
+            if (data.id === DEFAULT_DATABASE_QUIZ.id && data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
+              setCloudQuiz(DEFAULT_DATABASE_QUIZ);
+              setDoc(quizDocRef, JSON.parse(JSON.stringify(DEFAULT_DATABASE_QUIZ))).catch(console.warn);
+            } else {
+              setCloudQuiz(data);
+            }
             setIsLoadingQuiz(false);
           }
         } else {
-          // If not found in cloud, check local context fallback
-          const localFallback = quizzes.find((q) => q.id === quizId);
-          if (localFallback) {
-            setCloudQuiz(localFallback);
+          // If not found in cloud, check default or local context fallback
+          if (quizId === DEFAULT_DATABASE_QUIZ.id) {
+            setCloudQuiz(DEFAULT_DATABASE_QUIZ);
+            setDoc(quizDocRef, JSON.parse(JSON.stringify(DEFAULT_DATABASE_QUIZ))).catch(console.warn);
           } else {
-            setLoadError('Kuis dengan kode ini tidak ditemukan pada server.');
+            const localFallback = quizzes.find((q) => q.id === quizId);
+            if (localFallback) {
+              setCloudQuiz(localFallback);
+            } else {
+              setLoadError('Kuis dengan kode ini tidak ditemukan pada server.');
+            }
           }
           setIsLoadingQuiz(false);
         }
@@ -78,11 +90,21 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
       (error) => {
         console.warn('Real-time quiz fetch warning:', error);
         if (!isMounted) return;
+        if (quizId === DEFAULT_DATABASE_QUIZ.id) {
+          setCloudQuiz(DEFAULT_DATABASE_QUIZ);
+          setIsLoadingQuiz(false);
+          return;
+        }
         // Try fallback getDoc
         getDoc(quizDocRef)
           .then((snap) => {
             if (snap.exists()) {
-              setCloudQuiz(snap.data() as Quiz);
+              const data = snap.data() as Quiz;
+              if (data.id === DEFAULT_DATABASE_QUIZ.id && data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
+                setCloudQuiz(DEFAULT_DATABASE_QUIZ);
+              } else {
+                setCloudQuiz(data);
+              }
             } else {
               const localFallback = quizzes.find((q) => q.id === quizId);
               if (localFallback) {

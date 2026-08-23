@@ -140,7 +140,16 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const saved = localStorage.getItem(STORAGE_KEY_QUIZZES);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved) as Quiz[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Upgrade quiz-db-14 if it has fewer than 25 questions
+          return parsed.map((q) => {
+            if (q.id === DEFAULT_DATABASE_QUIZ.id && q.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
+              return DEFAULT_DATABASE_QUIZ;
+            }
+            return q;
+          });
+        }
       }
     } catch (e) {
       console.error('Failed to load quizzes from storage', e);
@@ -233,13 +242,27 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (!snapshot.empty) {
-          const cloudQuizzes: Quiz[] = [];
+          let cloudQuizzes: Quiz[] = [];
           snapshot.forEach((docSnap) => {
             const qData = docSnap.data() as Quiz;
             if (qData && qData.id) {
               cloudQuizzes.push(qData);
             }
           });
+
+          // Check if quiz-db-14 in cloud has fewer questions than the 25-question default
+          const dbQuizIdx = cloudQuizzes.findIndex((q) => q.id === DEFAULT_DATABASE_QUIZ.id);
+          if (dbQuizIdx >= 0) {
+            if (cloudQuizzes[dbQuizIdx].questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
+              cloudQuizzes[dbQuizIdx] = DEFAULT_DATABASE_QUIZ;
+              setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), sanitizeForFirestore(DEFAULT_DATABASE_QUIZ)).catch(console.warn);
+            }
+          } else {
+            // Seed DEFAULT_DATABASE_QUIZ if not present in collection
+            cloudQuizzes.unshift(DEFAULT_DATABASE_QUIZ);
+            setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), sanitizeForFirestore(DEFAULT_DATABASE_QUIZ)).catch(console.warn);
+          }
+
           if (cloudQuizzes.length > 0) {
             setQuizzes(cloudQuizzes);
           }
