@@ -4,7 +4,7 @@ import { Quiz, Question, QuizSubmission, QuestionResult, RespondentInfo } from '
 import { QuizLeaderboard } from './QuizLeaderboard';
 import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
 import { db, ensureAuth } from '../../lib/firebase';
-import { DEFAULT_DATABASE_QUIZ } from '../../data/defaultQuizzes';
+import { DEFAULT_DATABASE_QUIZ, DEFAULT_DA_QUIZ } from '../../data/defaultQuizzes';
 import confetti from 'canvas-confetti';
 import { 
   Clock, 
@@ -62,10 +62,13 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
         if (docSnap.exists()) {
           const data = docSnap.data() as Quiz;
           if (data && data.id) {
-            // Check if DEFAULT_DATABASE_QUIZ needs to be updated to 25 questions
+            // Check if DEFAULT_DATABASE_QUIZ or DEFAULT_DA_QUIZ needs to be updated to 25 questions
             if (data.id === DEFAULT_DATABASE_QUIZ.id && data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
               setCloudQuiz(DEFAULT_DATABASE_QUIZ);
               setDoc(quizDocRef, JSON.parse(JSON.stringify(DEFAULT_DATABASE_QUIZ))).catch(console.warn);
+            } else if (data.id === DEFAULT_DA_QUIZ.id && data.questions.length < DEFAULT_DA_QUIZ.questions.length) {
+              setCloudQuiz(DEFAULT_DA_QUIZ);
+              setDoc(quizDocRef, JSON.parse(JSON.stringify(DEFAULT_DA_QUIZ))).catch(console.warn);
             } else {
               setCloudQuiz(data);
             }
@@ -76,6 +79,9 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
           if (quizId === DEFAULT_DATABASE_QUIZ.id) {
             setCloudQuiz(DEFAULT_DATABASE_QUIZ);
             setDoc(quizDocRef, JSON.parse(JSON.stringify(DEFAULT_DATABASE_QUIZ))).catch(console.warn);
+          } else if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14') {
+            setCloudQuiz(DEFAULT_DA_QUIZ);
+            setDoc(doc(db, 'quizzes', DEFAULT_DA_QUIZ.id), JSON.parse(JSON.stringify(DEFAULT_DA_QUIZ))).catch(console.warn);
           } else {
             const localFallback = quizzes.find((q) => q.id === quizId);
             if (localFallback) {
@@ -95,6 +101,11 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
           setIsLoadingQuiz(false);
           return;
         }
+        if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14') {
+          setCloudQuiz(DEFAULT_DA_QUIZ);
+          setIsLoadingQuiz(false);
+          return;
+        }
         // Try fallback getDoc
         getDoc(quizDocRef)
           .then((snap) => {
@@ -102,24 +113,34 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
               const data = snap.data() as Quiz;
               if (data.id === DEFAULT_DATABASE_QUIZ.id && data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
                 setCloudQuiz(DEFAULT_DATABASE_QUIZ);
+              } else if (data.id === DEFAULT_DA_QUIZ.id && data.questions.length < DEFAULT_DA_QUIZ.questions.length) {
+                setCloudQuiz(DEFAULT_DA_QUIZ);
               } else {
                 setCloudQuiz(data);
               }
+            } else {
+              if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14') {
+                setCloudQuiz(DEFAULT_DA_QUIZ);
+              } else {
+                const localFallback = quizzes.find((q) => q.id === quizId);
+                if (localFallback) {
+                  setCloudQuiz(localFallback);
+                } else {
+                  setLoadError('Gagal memuat kuis dari server cloud.');
+                }
+              }
+            }
+          })
+          .catch(() => {
+            if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14') {
+              setCloudQuiz(DEFAULT_DA_QUIZ);
             } else {
               const localFallback = quizzes.find((q) => q.id === quizId);
               if (localFallback) {
                 setCloudQuiz(localFallback);
               } else {
-                setLoadError('Gagal memuat kuis dari server cloud.');
+                setLoadError('Koneksi terputus atau kuis tidak ditemukan.');
               }
-            }
-          })
-          .catch(() => {
-            const localFallback = quizzes.find((q) => q.id === quizId);
-            if (localFallback) {
-              setCloudQuiz(localFallback);
-            } else {
-              setLoadError('Koneksi terputus atau kuis tidak ditemukan.');
             }
           })
           .finally(() => {

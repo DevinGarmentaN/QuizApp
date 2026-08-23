@@ -12,7 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db, ensureAuth } from '../lib/firebase';
 import { Quiz, Question, QuizPage, QuizSettings, QuizSubmission, QuestionType, OptionItem, AuthUser } from '../types/quiz';
-import { DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ } from '../data/defaultQuizzes';
+import { DEFAULT_DATABASE_QUIZ, DEFAULT_DA_QUIZ, SAMPLE_MULTI_TYPE_QUIZ } from '../data/defaultQuizzes';
 
 export const PRIMARY_INSTRUCTOR: AuthUser & { password: string } = {
   id: 'user-dosen-devin',
@@ -142,19 +142,26 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (saved) {
         const parsed = JSON.parse(saved) as Quiz[];
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Upgrade quiz-db-14 if it has fewer than 25 questions
-          return parsed.map((q) => {
+          // Upgrade quizzes if they have fewer questions than default
+          let updated = parsed.map((q) => {
             if (q.id === DEFAULT_DATABASE_QUIZ.id && q.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
               return DEFAULT_DATABASE_QUIZ;
             }
+            if (q.id === DEFAULT_DA_QUIZ.id && q.questions.length < DEFAULT_DA_QUIZ.questions.length) {
+              return DEFAULT_DA_QUIZ;
+            }
             return q;
           });
+          if (!updated.some((q) => q.id === DEFAULT_DA_QUIZ.id)) {
+            updated.splice(1, 0, DEFAULT_DA_QUIZ);
+          }
+          return updated;
         }
       }
     } catch (e) {
       console.error('Failed to load quizzes from storage', e);
     }
-    return [DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ];
+    return [DEFAULT_DATABASE_QUIZ, DEFAULT_DA_QUIZ, SAMPLE_MULTI_TYPE_QUIZ];
   });
 
   const [submissions, setSubmissions] = useState<QuizSubmission[]>([]);
@@ -263,6 +270,19 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), sanitizeForFirestore(DEFAULT_DATABASE_QUIZ)).catch(console.warn);
           }
 
+          // Check if quiz-1787487557515 (DA) in cloud has fewer questions or is missing
+          const daQuizIdx = cloudQuizzes.findIndex((q) => q.id === DEFAULT_DA_QUIZ.id);
+          if (daQuizIdx >= 0) {
+            if (cloudQuizzes[daQuizIdx].questions.length < DEFAULT_DA_QUIZ.questions.length) {
+              cloudQuizzes[daQuizIdx] = DEFAULT_DA_QUIZ;
+              setDoc(doc(db, 'quizzes', DEFAULT_DA_QUIZ.id), sanitizeForFirestore(DEFAULT_DA_QUIZ)).catch(console.warn);
+            }
+          } else {
+            // Seed DEFAULT_DA_QUIZ if not present in collection
+            cloudQuizzes.splice(1, 0, DEFAULT_DA_QUIZ);
+            setDoc(doc(db, 'quizzes', DEFAULT_DA_QUIZ.id), sanitizeForFirestore(DEFAULT_DA_QUIZ)).catch(console.warn);
+          }
+
           if (cloudQuizzes.length > 0) {
             setQuizzes(cloudQuizzes);
           }
@@ -271,6 +291,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const seedBatch = async () => {
             try {
               await setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), sanitizeForFirestore(DEFAULT_DATABASE_QUIZ));
+              await setDoc(doc(db, 'quizzes', DEFAULT_DA_QUIZ.id), sanitizeForFirestore(DEFAULT_DA_QUIZ));
               await setDoc(doc(db, 'quizzes', SAMPLE_MULTI_TYPE_QUIZ.id), sanitizeForFirestore(SAMPLE_MULTI_TYPE_QUIZ));
             } catch (err) {
               console.warn('Error seeding default quizzes to Firestore:', err);
