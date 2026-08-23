@@ -92,6 +92,26 @@ const STORAGE_KEY_QUIZZES = 'flexitest_quizzes_v2';
 const STORAGE_KEY_AUTH = 'flexitest_auth_user_v1';
 const DUMMY_SUBMISSION_IDS = new Set(['sub-1', 'sub-2', 'sub-3', 'sub-4', 'sub-5', 'sub-6']);
 
+// Helper to extract quizId from URL hash or query params
+const getInitialQuizIdFromUrl = (): string | null => {
+  try {
+    if (typeof window === 'undefined') return null;
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    
+    if (hash.startsWith('#quiz=')) return decodeURIComponent(hash.replace('#quiz=', '').split('&')[0]);
+    if (hash.startsWith('#/quiz/')) return decodeURIComponent(hash.replace('#/quiz/', '').split('&')[0]);
+    if (search.includes('quiz=')) {
+      const params = new URLSearchParams(search);
+      const q = params.get('quiz');
+      if (q) return q;
+    }
+  } catch (e) {
+    console.warn('URL parsing error', e);
+  }
+  return null;
+};
+
 // Helper to sanitize data by removing undefined fields for Firebase Firestore
 const sanitizeForFirestore = <T,>(obj: T): T => {
   return JSON.parse(
@@ -102,6 +122,8 @@ const sanitizeForFirestore = <T,>(obj: T): T => {
 const QuizContext = createContext<QuizContextType | undefined>(undefined);
 
 export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const initialUrlQuizId = getInitialQuizIdFromUrl();
+
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_AUTH);
@@ -129,13 +151,31 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [submissions, setSubmissions] = useState<QuizSubmission[]>([]);
   const [activeQuizId, setActiveQuizId] = useState<string>(DEFAULT_DATABASE_QUIZ.id);
   const [activeTab, setActiveTab] = useState<'create' | 'configure' | 'publish' | 'analyze' | 'preview'>('create');
-  const [appMode, setAppMode] = useState<'admin' | 'taker'>('admin');
-  const [takingQuizId, setTakingQuizId] = useState<string | null>(null);
+  const [appMode, setAppMode] = useState<'admin' | 'taker'>(initialUrlQuizId ? 'taker' : 'admin');
+  const [takingQuizId, setTakingQuizId] = useState<string | null>(initialUrlQuizId);
   const [isCloudSynced, setIsCloudSynced] = useState<boolean>(false);
 
   // Initialize Anonymous Firebase Auth
   useEffect(() => {
     ensureAuth();
+  }, []);
+
+  // Listen to hash and search changes globally so student links work without auth
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const targetId = getInitialQuizIdFromUrl();
+      if (targetId) {
+        setTakingQuizId(targetId);
+        setAppMode('taker');
+      }
+    };
+
+    window.addEventListener('hashchange', handleUrlChange);
+    window.addEventListener('popstate', handleUrlChange);
+    return () => {
+      window.removeEventListener('hashchange', handleUrlChange);
+      window.removeEventListener('popstate', handleUrlChange);
+    };
   }, []);
 
   // Sync Submissions from Cloud Firestore in Real-time across all devices!

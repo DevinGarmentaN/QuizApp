@@ -509,10 +509,10 @@ export const LoginPage: React.FC = () => {
               </div>
 
               <form onSubmit={handleQuickStudentAccess} className="space-y-4">
-                {/* Select Quiz */}
+                {/* Select Quiz or Enter Custom Code */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Pilih Kuis / Ujian Yang Akan Dikerjakan
+                    Pilih Kuis Dari Daftar
                   </label>
                   <select
                     value={selectedQuizId}
@@ -527,27 +527,33 @@ export const LoginPage: React.FC = () => {
                   </select>
                 </div>
 
-                {/* Token or Access Code if any */}
+                {/* Custom Quiz ID input */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Token / Kode Akses Ujian (Opsional)
+                    Atau Masukkan Kode / ID Kuis Khusus
                   </label>
-                  <div className="relative">
-                    <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={studentAccessCode}
-                      onChange={(e) => setStudentAccessCode(e.target.value)}
-                      placeholder="Masukkan kode akses jika diminta pengajar..."
-                      className="w-full pl-10 pr-3.5 py-2.5 text-xs sm:text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={selectedQuizId}
+                    onChange={(e) => {
+                      let val = e.target.value.trim();
+                      if (val.includes('#quiz=')) val = val.split('#quiz=')[1];
+                      if (val.includes('?quiz=')) val = new URLSearchParams(val.split('?')[1]).get('quiz') || val;
+                      setSelectedQuizId(val);
+                    }}
+                    placeholder="Contoh: quiz-1787487557515 atau quiz-db-14"
+                    className="w-full px-3.5 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 bg-white"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Jika dosen membagikan ID kuis atau link tertentu, Anda dapat menempelkannya di sini.
+                  </p>
                 </div>
 
                 {/* Launch Button */}
                 <button
                   type="submit"
-                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition transform active:scale-98 flex items-center justify-center gap-2 mt-2"
+                  disabled={!selectedQuizId}
+                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition transform active:scale-98 flex items-center justify-center gap-2 mt-2 cursor-pointer"
                 >
                   <GraduationCap className="w-4 h-4" />
                   <span>Buka Lembar Ujian Mahasiswa ➔</span>

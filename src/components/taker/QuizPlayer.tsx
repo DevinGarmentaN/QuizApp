@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuiz } from '../../context/QuizContext';
 import { Quiz, Question, QuizSubmission, QuestionResult, RespondentInfo } from '../../types/quiz';
 import { QuizLeaderboard } from './QuizLeaderboard';
+import { doc, onSnapshot, getDoc } from 'firebase/firestore';
+import { db, ensureAuth } from '../../lib/firebase';
 import confetti from 'canvas-confetti';
 import { 
   Clock, 
@@ -25,7 +27,8 @@ import {
   Users,
   ZoomIn,
   X,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Loader2
 } from 'lucide-react';
 
 interface QuizPlayerProps {
@@ -36,7 +39,84 @@ interface QuizPlayerProps {
 export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
   const { quizzes, submissions, submitQuizResult, currentUser } = useQuiz();
 
-  const quiz = useMemo(() => quizzes.find((q) => q.id === quizId) || quizzes[0], [quizzes, quizId]);
+  const [cloudQuiz, setCloudQuiz] = useState<Quiz | null>(null);
+  const [isLoadingQuiz, setIsLoadingQuiz] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Directly subscribe to this specific quiz in Cloud Firestore for real-time fresh updates
+  useEffect(() => {
+    let isMounted = true;
+    setIsLoadingQuiz(true);
+    setLoadError(null);
+
+    ensureAuth();
+
+    const quizDocRef = doc(db, 'quizzes', quizId);
+
+    // Real-time listener for the specific quiz
+    const unsubscribe = onSnapshot(
+      quizDocRef,
+      (docSnap) => {
+        if (!isMounted) return;
+        if (docSnap.exists()) {
+          const data = docSnap.data() as Quiz;
+          if (data && data.id) {
+            setCloudQuiz(data);
+            setIsLoadingQuiz(false);
+          }
+        } else {
+          // If not found in cloud, check local context fallback
+          const localFallback = quizzes.find((q) => q.id === quizId);
+          if (localFallback) {
+            setCloudQuiz(localFallback);
+          } else {
+            setLoadError('Kuis dengan kode ini tidak ditemukan pada server.');
+          }
+          setIsLoadingQuiz(false);
+        }
+      },
+      (error) => {
+        console.warn('Real-time quiz fetch warning:', error);
+        if (!isMounted) return;
+        // Try fallback getDoc
+        getDoc(quizDocRef)
+          .then((snap) => {
+            if (snap.exists()) {
+              setCloudQuiz(snap.data() as Quiz);
+            } else {
+              const localFallback = quizzes.find((q) => q.id === quizId);
+              if (localFallback) {
+                setCloudQuiz(localFallback);
+              } else {
+                setLoadError('Gagal memuat kuis dari server cloud.');
+              }
+            }
+          })
+          .catch(() => {
+            const localFallback = quizzes.find((q) => q.id === quizId);
+            if (localFallback) {
+              setCloudQuiz(localFallback);
+            } else {
+              setLoadError('Koneksi terputus atau kuis tidak ditemukan.');
+            }
+          })
+          .finally(() => {
+            if (isMounted) setIsLoadingQuiz(false);
+          });
+      }
+    );
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [quizId, quizzes]);
+
+  // Use the cloud quiz as the ultimate source of truth, or context match as fallback
+  const quiz = useMemo(() => {
+    if (cloudQuiz && cloudQuiz.id === quizId) return cloudQuiz;
+    return quizzes.find((q) => q.id === quizId) || null;
+  }, [cloudQuiz, quizzes, quizId]);
 
   // Phase: 'register' | 'taking' | 'result'
   const [phase, setPhase] = useState<'register' | 'taking' | 'result'>('register');
@@ -82,7 +162,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
 
   // Timer countdown
   useEffect(() => {
-    if (phase !== 'taking' || !quiz.settings.timeLimitMinutes || quiz.settings.timeLimitMinutes <= 0) {
+    if (!quiz || phase !== 'taking' || !quiz.settings.timeLimitMinutes || quiz.settings.timeLimitMinutes <= 0) {
       return;
     }
 
@@ -102,6 +182,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
 
   const handleStartTest = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!quiz) return;
 
     if (quiz.settings.requireRegistration.name && !respondent.name.trim()) {
       alert('Mohon masukkan nama lengkap Anda.');
@@ -138,6 +219,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
   };
 
   const handleFinalSubmit = (forced = false) => {
+    if (!quiz) return;
     if (!forced && !confirm('Apakah Anda yakin ingin mengumpulkan lembar ujian ini sekarang?')) {
       return;
     }
@@ -259,6 +341,47 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
     const secs = totalSecs % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
+
+  // Loading State
+  if (isLoadingQuiz && !quiz) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
+        <div className="bg-slate-800/90 border border-slate-700 p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-sm w-full text-center space-y-4 animate-in fade-in">
+          <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
+          <div>
+            <h3 className="font-bold text-base text-slate-100">Memuat Lembar Ujian...</h3>
+            <p className="text-xs text-slate-400 mt-1">Mengambil butir soal terbaru dari Cloud Server.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Not Found State
+  if (!quiz) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
+        <div className="bg-slate-800/90 border border-slate-700 p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-md w-full text-center space-y-4 animate-in fade-in">
+          <AlertCircle className="w-12 h-12 text-rose-400" />
+          <div>
+            <h3 className="font-bold text-lg text-slate-100">Kuis Tidak Ditemukan</h3>
+            <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+              {loadError || `Kuis dengan kode "${quizId}" belum tersedia di database atau link ujian yang Anda buka tidak valid.`}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-2">
+              Silakan pastikan dosen pengajar telah mempublikasikan kuis atau periksa kembali link yang dibagikan.
+            </p>
+          </div>
+          <button
+            onClick={onExit}
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
+          >
+            Kembali ke Halaman Utama
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // 1. REGISTRATION PHASE
   if (phase === 'register') {
