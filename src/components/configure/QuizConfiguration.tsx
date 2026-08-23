@@ -23,11 +23,13 @@ export const QuizConfiguration: React.FC = () => {
     updateQuizSettings, 
     submissions, 
     clearQuizSubmissions, 
-    deleteQuiz 
+    deleteQuiz,
+    persistQuizToCloud
   } = useQuiz();
   
   const [saveToast, setSaveToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('Pengaturan tersimpan otomatis');
+  const [isSavingCloud, setIsSavingCloud] = useState(false);
   const [isClearDataModalOpen, setIsClearDataModalOpen] = useState(false);
   const [isDeleteQuizModalOpen, setIsDeleteQuizModalOpen] = useState(false);
 
@@ -40,6 +42,13 @@ export const QuizConfiguration: React.FC = () => {
     setToastMessage(msg);
     setSaveToast(true);
     setTimeout(() => setSaveToast(false), 2500);
+  };
+
+  const handleManualSave = async () => {
+    setIsSavingCloud(true);
+    await persistQuizToCloud(activeQuiz);
+    setIsSavingCloud(false);
+    showSavedFeedback('Konfigurasi berhasil disimpan & disinkronkan ke Cloud');
   };
 
   const handleUpdate = (field: string, value: any) => {
@@ -80,14 +89,28 @@ export const QuizConfiguration: React.FC = () => {
       )}
 
       {/* Header */}
-      <div>
-        <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
-          <Settings className="w-5 h-5 text-indigo-600" />
-          Konfigurasi & Pengaturan Ujian
-        </h2>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Atur passing grade, durasi waktu, autentikasi peserta, token keamanan, dan opsi evaluasi.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+            <Settings className="w-5 h-5 text-indigo-600" />
+            Konfigurasi & Pengaturan Ujian
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Atur passing grade, durasi waktu, autentikasi peserta, token keamanan, dan opsi evaluasi.
+          </p>
+        </div>
+
+        <div className="flex items-center space-x-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleManualSave}
+            disabled={isSavingCloud}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center space-x-2 cursor-pointer active:scale-95"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>{isSavingCloud ? 'Menyimpan...' : 'Simpan Perubahan'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Settings Sections */}

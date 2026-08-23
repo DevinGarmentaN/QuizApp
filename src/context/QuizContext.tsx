@@ -147,10 +147,10 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Upgrade quizzes if they have fewer questions than default
           let updated = parsed.map((q) => {
             if (q.id === DEFAULT_DATABASE_QUIZ.id && q.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
-              return DEFAULT_DATABASE_QUIZ;
+              return { ...DEFAULT_DATABASE_QUIZ, ...q, questions: DEFAULT_DATABASE_QUIZ.questions };
             }
             if (q.id === DEFAULT_DA_QUIZ.id && q.questions.length < DEFAULT_DA_QUIZ.questions.length) {
-              return DEFAULT_DA_QUIZ;
+              return { ...DEFAULT_DA_QUIZ, ...q, questions: DEFAULT_DA_QUIZ.questions };
             }
             return q;
           });
@@ -282,8 +282,12 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const dbQuizIdx = cloudQuizzes.findIndex((q) => q.id === DEFAULT_DATABASE_QUIZ.id);
           if (dbQuizIdx >= 0) {
             if (cloudQuizzes[dbQuizIdx].questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
-              cloudQuizzes[dbQuizIdx] = DEFAULT_DATABASE_QUIZ;
-              persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
+              cloudQuizzes[dbQuizIdx] = {
+                ...DEFAULT_DATABASE_QUIZ,
+                ...cloudQuizzes[dbQuizIdx],
+                questions: DEFAULT_DATABASE_QUIZ.questions,
+              };
+              persistQuizToCloud(cloudQuizzes[dbQuizIdx]);
             }
           } else {
             // Seed DEFAULT_DATABASE_QUIZ if not present in collection
@@ -295,8 +299,12 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const daQuizIdx = cloudQuizzes.findIndex((q) => q.id === DEFAULT_DA_QUIZ.id);
           if (daQuizIdx >= 0) {
             if (cloudQuizzes[daQuizIdx].questions.length < DEFAULT_DA_QUIZ.questions.length) {
-              cloudQuizzes[daQuizIdx] = DEFAULT_DA_QUIZ;
-              persistQuizToCloud(DEFAULT_DA_QUIZ);
+              cloudQuizzes[daQuizIdx] = {
+                ...DEFAULT_DA_QUIZ,
+                ...cloudQuizzes[daQuizIdx],
+                questions: DEFAULT_DA_QUIZ.questions,
+              };
+              persistQuizToCloud(cloudQuizzes[daQuizIdx]);
             }
           } else {
             // Seed DEFAULT_DA_QUIZ if not present in collection
@@ -420,8 +428,8 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateQuizSettings = (quizId: string, settingsUpdate: Partial<QuizSettings>) => {
-    setQuizzes((prev) =>
-      prev.map((q) => {
+    setQuizzes((prev) => {
+      const next = prev.map((q) => {
         if (q.id === quizId) {
           const updated: Quiz = {
             ...q,
@@ -432,8 +440,14 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return updated;
         }
         return q;
-      })
-    );
+      });
+      try {
+        localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify(next));
+      } catch (e) {
+        console.warn(e);
+      }
+      return next;
+    });
   };
 
   const deleteQuiz = async (quizId: string) => {

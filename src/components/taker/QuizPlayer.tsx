@@ -41,13 +41,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
   const { quizzes, submissions, submitQuizResult, currentUser, persistQuizToCloud } = useQuiz();
 
   const [cloudQuiz, setCloudQuiz] = useState<Quiz | null>(() => {
-    // Immediate check in memory & localStorage to prevent flash of not-found
-    if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
-      return DEFAULT_DATABASE_QUIZ;
-    }
-    if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14' || quizId.includes('1787487557515')) {
-      return DEFAULT_DA_QUIZ;
-    }
+    // Check in memory & localStorage first to get customized settings
     const memFound = quizzes.find((q) => q.id === quizId);
     if (memFound) return memFound;
     try {
@@ -59,6 +53,12 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
       }
     } catch (e) {
       console.warn(e);
+    }
+    if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
+      return DEFAULT_DATABASE_QUIZ;
+    }
+    if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14' || quizId.includes('1787487557515')) {
+      return DEFAULT_DA_QUIZ;
     }
     return null;
   });
@@ -89,19 +89,26 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
           if (data && data.id) {
             // Check if DEFAULT_DATABASE_QUIZ or DEFAULT_DA_QUIZ needs to be updated to 25 questions
             if (data.id === DEFAULT_DATABASE_QUIZ.id && data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
-              setCloudQuiz(DEFAULT_DATABASE_QUIZ);
-              persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
+              const merged = { ...DEFAULT_DATABASE_QUIZ, ...data, questions: DEFAULT_DATABASE_QUIZ.questions };
+              setCloudQuiz(merged);
+              persistQuizToCloud(merged);
             } else if (data.id === DEFAULT_DA_QUIZ.id && data.questions.length < DEFAULT_DA_QUIZ.questions.length) {
-              setCloudQuiz(DEFAULT_DA_QUIZ);
-              persistQuizToCloud(DEFAULT_DA_QUIZ);
+              const merged = { ...DEFAULT_DA_QUIZ, ...data, questions: DEFAULT_DA_QUIZ.questions };
+              setCloudQuiz(merged);
+              persistQuizToCloud(merged);
             } else {
               setCloudQuiz(data);
             }
             setIsLoadingQuiz(false);
           }
         } else {
-          // If not found in cloud, check default or local context fallback
-          if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
+          // If not found in cloud, check memory, storage, then default fallback
+          const localFallback = quizzes.find((q) => q.id === quizId);
+          if (localFallback) {
+            setCloudQuiz(localFallback);
+            persistQuizToCloud(localFallback);
+            setIsLoadingQuiz(false);
+          } else if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
             setCloudQuiz(DEFAULT_DATABASE_QUIZ);
             persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
             setIsLoadingQuiz(false);
@@ -110,36 +117,35 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
             persistQuizToCloud(DEFAULT_DA_QUIZ);
             setIsLoadingQuiz(false);
           } else {
-            const localFallback = quizzes.find((q) => q.id === quizId);
-            if (localFallback) {
-              setCloudQuiz(localFallback);
-              persistQuizToCloud(localFallback);
-              setIsLoadingQuiz(false);
-            } else {
-              try {
-                const saved = localStorage.getItem('flexitest_quizzes_v2');
-                if (saved) {
-                  const list = JSON.parse(saved) as Quiz[];
-                  const storageFallback = list.find((q) => q.id === quizId);
-                  if (storageFallback) {
-                    setCloudQuiz(storageFallback);
-                    persistQuizToCloud(storageFallback);
-                    setIsLoadingQuiz(false);
-                    return;
-                  }
+            try {
+              const saved = localStorage.getItem('flexitest_quizzes_v2');
+              if (saved) {
+                const list = JSON.parse(saved) as Quiz[];
+                const storageFallback = list.find((q) => q.id === quizId);
+                if (storageFallback) {
+                  setCloudQuiz(storageFallback);
+                  persistQuizToCloud(storageFallback);
+                  setIsLoadingQuiz(false);
+                  return;
                 }
-              } catch (e) {
-                console.warn(e);
               }
-              setLoadError('Kuis dengan kode ini belum tersedia di cloud database.');
-              setIsLoadingQuiz(false);
+            } catch (e) {
+              console.warn(e);
             }
+            setLoadError('Kuis dengan kode ini belum tersedia di cloud database.');
+            setIsLoadingQuiz(false);
           }
         }
       },
       (error) => {
         console.warn('Real-time quiz fetch warning:', error);
         if (!isMounted) return;
+        const localFallback = quizzes.find((q) => q.id === quizId);
+        if (localFallback) {
+          setCloudQuiz(localFallback);
+          setIsLoadingQuiz(false);
+          return;
+        }
         if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
           setCloudQuiz(DEFAULT_DATABASE_QUIZ);
           setIsLoadingQuiz(false);
@@ -156,27 +162,29 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
             if (snap.exists()) {
               const data = snap.data() as Quiz;
               if (data.id === DEFAULT_DATABASE_QUIZ.id && data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
-                setCloudQuiz(DEFAULT_DATABASE_QUIZ);
+                const merged = { ...DEFAULT_DATABASE_QUIZ, ...data, questions: DEFAULT_DATABASE_QUIZ.questions };
+                setCloudQuiz(merged);
               } else if (data.id === DEFAULT_DA_QUIZ.id && data.questions.length < DEFAULT_DA_QUIZ.questions.length) {
-                setCloudQuiz(DEFAULT_DA_QUIZ);
+                const merged = { ...DEFAULT_DA_QUIZ, ...data, questions: DEFAULT_DA_QUIZ.questions };
+                setCloudQuiz(merged);
               } else {
                 setCloudQuiz(data);
               }
             } else {
-              const localFallback = quizzes.find((q) => q.id === quizId);
-              if (localFallback) {
-                setCloudQuiz(localFallback);
-                persistQuizToCloud(localFallback);
+              const localMem = quizzes.find((q) => q.id === quizId);
+              if (localMem) {
+                setCloudQuiz(localMem);
+                persistQuizToCloud(localMem);
               } else {
                 setLoadError('Gagal memuat kuis dari server cloud.');
               }
             }
           })
           .catch(() => {
-            const localFallback = quizzes.find((q) => q.id === quizId);
-            if (localFallback) {
-              setCloudQuiz(localFallback);
-              persistQuizToCloud(localFallback);
+            const localMem = quizzes.find((q) => q.id === quizId);
+            if (localMem) {
+              setCloudQuiz(localMem);
+              persistQuizToCloud(localMem);
             } else {
               setLoadError('Koneksi terputus atau kuis tidak ditemukan.');
             }
