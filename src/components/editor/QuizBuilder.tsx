@@ -48,6 +48,10 @@ export const QuizBuilder: React.FC<QuizBuilderProps> = ({ onOpenAiModal }) => {
   const [activePageId, setActivePageId] = useState<string>('page-1');
   const [openAddItemMenuPageId, setOpenAddItemMenuPageId] = useState<string | null>(null);
   const [editingPageInfo, setEditingPageInfo] = useState<{ id: string; title: string } | null>(null);
+  
+  // Custom delete confirmation modals
+  const [questionToDelete, setQuestionToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [pageToDelete, setPageToDelete] = useState<{ id: string; pageIndex: number } | null>(null);
 
   if (!activeQuiz) return null;
 
@@ -176,12 +180,8 @@ export const QuizBuilder: React.FC<QuizBuilderProps> = ({ onOpenAiModal }) => {
                 </button>
                 {activeQuiz.pages.length > 1 && (
                   <button
-                    onClick={() => {
-                      if (confirm(`Hapus Halaman ${pageIndex + 1}? Soal akan dipindahkan ke halaman pertama.`)) {
-                        deletePage(activeQuiz.id, page.id);
-                      }
-                    }}
-                    className="hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition"
+                    onClick={() => setPageToDelete({ id: page.id, pageIndex: pageIndex + 1 })}
+                    className="hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition cursor-pointer"
                     title="Hapus halaman ini"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -315,12 +315,8 @@ export const QuizBuilder: React.FC<QuizBuilderProps> = ({ onOpenAiModal }) => {
                             </button>
 
                             <button
-                              onClick={() => {
-                                if (confirm('Hapus butir soal ini?')) {
-                                  deleteQuestion(activeQuiz.id, question.id);
-                                }
-                              }}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
+                              onClick={() => setQuestionToDelete({ id: question.id, title: question.title })}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition cursor-pointer"
                               title="Hapus Soal"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -503,6 +499,85 @@ export const QuizBuilder: React.FC<QuizBuilderProps> = ({ onOpenAiModal }) => {
           }}
           onSave={handleSaveQuestion}
         />
+      )}
+
+      {/* Confirmation Modal: Delete Question */}
+      {questionToDelete && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-6">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">
+                Hapus Butir Soal Ini?
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Anda akan menghapus soal: <br />
+                <strong className="text-slate-900 font-bold line-clamp-2 mt-1">{questionToDelete.title}</strong>
+              </p>
+
+              <div className="mt-6 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setQuestionToDelete(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    deleteQuestion(activeQuiz.id, questionToDelete.id);
+                    setQuestionToDelete(null);
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition cursor-pointer active:scale-95"
+                >
+                  Ya, Hapus Soal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete Page */}
+      {pageToDelete && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-6">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">
+                Hapus Halaman {pageToDelete.pageIndex}?
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Seluruh butir soal yang ada di dalam halaman ini akan otomatis dipindahkan ke halaman pertama.
+              </p>
+
+              <div className="mt-6 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setPageToDelete(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    deletePage(activeQuiz.id, pageToDelete.id);
+                    setPageToDelete(null);
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition cursor-pointer active:scale-95"
+                >
+                  Ya, Hapus Halaman
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

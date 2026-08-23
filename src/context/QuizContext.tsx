@@ -1,6 +1,27 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Quiz, Question, QuizPage, QuizSettings, QuizSubmission, QuestionType, OptionItem } from '../types/quiz';
+import { Quiz, Question, QuizPage, QuizSettings, QuizSubmission, QuestionType, OptionItem, AuthUser } from '../types/quiz';
 import { DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ, INITIAL_SUBMISSIONS } from '../data/defaultQuizzes';
+
+export const PRIMARY_INSTRUCTOR: AuthUser & { password: string } = {
+  id: 'user-dosen-devin',
+  name: 'Devin Garmenta Nuriansyah, S.Kom., M.Kom',
+  email: 'devinnuriansyah@gmail.com',
+  role: 'dosen',
+  institution: 'Fakultas Ilmu Komputer & Teknologi Informasi',
+  password: '12345678',
+  joinedAt: '2024-01-01',
+};
+
+export const DEMO_INSTRUCTORS: AuthUser[] = [
+  {
+    id: PRIMARY_INSTRUCTOR.id,
+    name: PRIMARY_INSTRUCTOR.name,
+    email: PRIMARY_INSTRUCTOR.email,
+    role: PRIMARY_INSTRUCTOR.role,
+    institution: PRIMARY_INSTRUCTOR.institution,
+    joinedAt: PRIMARY_INSTRUCTOR.joinedAt,
+  },
+];
 
 interface QuizContextType {
   quizzes: Quiz[];
@@ -10,6 +31,13 @@ interface QuizContextType {
   activeTab: 'create' | 'configure' | 'publish' | 'analyze' | 'preview';
   appMode: 'admin' | 'taker';
   takingQuizId: string | null;
+  currentUser: AuthUser | null;
+  
+  // Auth Actions
+  login: (email: string, password?: string) => boolean;
+  registerUser: (name: string, email: string, role: 'dosen' | 'guru' | 'instruktur' | 'admin', institution?: string) => boolean;
+  logout: () => void;
+  demoLogin: (roleType?: 'dosen' | 'guru' | 'admin' | string) => void;
   
   // Actions
   setActiveQuizId: (id: string) => void;
@@ -48,10 +76,23 @@ interface QuizContextType {
 
 const STORAGE_KEY_QUIZZES = 'flexitest_quizzes_v1';
 const STORAGE_KEY_SUBMISSIONS = 'flexitest_submissions_v1';
+const STORAGE_KEY_AUTH = 'flexitest_auth_user_v1';
 
 const QuizContext = createContext<QuizContextType | undefined>(undefined);
 
 export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_AUTH);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error('Failed to load auth user from storage', e);
+    }
+    return null;
+  });
+
   const [quizzes, setQuizzes] = useState<Quiz[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_QUIZZES);
@@ -111,7 +152,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         title,
         description: description || 'Deskripsi instruksi pengerjaan kuis ini.',
         category: 'Umum',
-        author: 'Pengajar / Pembuat Soal',
+        author: currentUser?.name || PRIMARY_INSTRUCTOR.name,
         status: 'in_design',
         timeLimitMinutes: 30,
         passingPercentage: 70,
@@ -183,7 +224,6 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const deleteQuiz = (quizId: string) => {
     if (quizzes.length <= 1) {
-      alert('Anda harus menyisakan setidaknya 1 kuis.');
       return;
     }
     setQuizzes((prev) => {
@@ -423,6 +463,85 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSubmissions((prev) => prev.filter((s) => s.quizId !== quizId));
   };
 
+  // Sync auth to local storage
+  useEffect(() => {
+    try {
+      if (currentUser) {
+        localStorage.setItem(STORAGE_KEY_AUTH, JSON.stringify(currentUser));
+      } else {
+        localStorage.removeItem(STORAGE_KEY_AUTH);
+      }
+    } catch (e) {
+      console.error('Failed to save auth user', e);
+    }
+  }, [currentUser]);
+
+  // Auth Operations
+  const login = (email: string, password?: string): boolean => {
+    const inputEmail = email.trim().toLowerCase();
+    const inputPassword = password?.trim() || '';
+
+    // Check credentials: password must be 12345678
+    if (inputPassword !== PRIMARY_INSTRUCTOR.password && inputPassword !== '12345678') {
+      return false;
+    }
+
+    // If matches primary instructor email or any login attempt with correct password
+    if (
+      inputEmail === PRIMARY_INSTRUCTOR.email.toLowerCase() ||
+      inputEmail.includes('devin') ||
+      inputEmail.includes('nuriansyah')
+    ) {
+      setCurrentUser(PRIMARY_INSTRUCTOR);
+      return true;
+    }
+
+    // If user provided a specific custom name/email with correct password
+    const username = email.split('@')[0] || 'Dosen';
+    const formattedName = username
+      .split(/[._-]/)
+      .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+      .join(' ');
+
+    const loggedUser: AuthUser = {
+      id: PRIMARY_INSTRUCTOR.id,
+      name: PRIMARY_INSTRUCTOR.name, // Primary requested instructor name
+      email: inputEmail || PRIMARY_INSTRUCTOR.email,
+      role: 'dosen',
+      institution: PRIMARY_INSTRUCTOR.institution,
+      joinedAt: PRIMARY_INSTRUCTOR.joinedAt,
+    };
+
+    setCurrentUser(loggedUser);
+    return true;
+  };
+
+  const registerUser = (
+    name: string,
+    email: string,
+    role: 'dosen' | 'guru' | 'instruktur' | 'admin',
+    institution?: string
+  ): boolean => {
+    const newUser: AuthUser = {
+      id: 'user-' + Date.now(),
+      name: name || PRIMARY_INSTRUCTOR.name,
+      email: email || PRIMARY_INSTRUCTOR.email,
+      role,
+      institution: institution || PRIMARY_INSTRUCTOR.institution,
+      joinedAt: new Date().toISOString().split('T')[0],
+    };
+    setCurrentUser(newUser);
+    return true;
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+  };
+
+  const demoLogin = (_roleType?: string) => {
+    setCurrentUser(PRIMARY_INSTRUCTOR);
+  };
+
   const resetToDefaultData = () => {
     setQuizzes([DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ]);
     setSubmissions(INITIAL_SUBMISSIONS);
@@ -462,6 +581,11 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeTab,
         appMode,
         takingQuizId,
+        currentUser,
+        login,
+        registerUser,
+        logout,
+        demoLogin,
         setActiveQuizId,
         setActiveTab,
         setAppMode,

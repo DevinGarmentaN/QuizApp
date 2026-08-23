@@ -107,6 +107,16 @@ export interface QuestionResult {
   explanation?: string;
 }
 
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'dosen' | 'guru' | 'instruktur' | 'admin';
+  institution?: string;
+  avatarUrl?: string;
+  joinedAt?: string;
+}
+
 export interface QuizSubmission {
   id: string;
   quizId: string;

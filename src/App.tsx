@@ -11,6 +11,7 @@ import { QuizPlayer } from './components/taker/QuizPlayer';
 import { QuizPrintView } from './components/print/QuizPrintView';
 import { AiQuizGeneratorModal } from './components/editor/AiQuizGeneratorModal';
 import { NewQuizModal } from './components/dashboard/NewQuizModal';
+import { LoginPage } from './components/auth/LoginPage';
 
 const MainAppContent: React.FC = () => {
   const { 
@@ -21,7 +22,8 @@ const MainAppContent: React.FC = () => {
     setTakingQuizId, 
     activeQuizId, 
     setActiveQuizId,
-    quizzes 
+    quizzes,
+    currentUser 
   } = useQuiz();
 
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
@@ -64,6 +66,11 @@ const MainAppContent: React.FC = () => {
   // If in Print Mode
   if (isPrintViewOpen) {
     return <QuizPrintView onClose={() => setIsPrintViewOpen(false)} />;
+  }
+
+  // If not logged in as Instructor/Teacher, show Login Portal
+  if (!currentUser) {
+    return <LoginPage />;
   }
 
   return (

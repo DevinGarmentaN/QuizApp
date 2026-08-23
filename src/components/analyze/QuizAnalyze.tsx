@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuiz } from '../../context/QuizContext';
-import { QuizSubmission, QuestionResult } from '../../types/quiz';
+import { QuizSubmission } from '../../types/quiz';
 import { 
   BarChart2, 
   Users, 
@@ -13,13 +13,18 @@ import {
   Eye, 
   FileSpreadsheet, 
   X,
-  HelpCircle,
-  Sparkles
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
 
 export const QuizAnalyze: React.FC = () => {
   const { activeQuiz, submissions, deleteSubmission, clearQuizSubmissions } = useQuiz();
   const [selectedSubmission, setSelectedSubmission] = useState<QuizSubmission | null>(null);
+  
+  // Custom confirmation dialog states
+  const [isClearAllModalOpen, setIsClearAllModalOpen] = useState(false);
+  const [submissionToDelete, setSubmissionToDelete] = useState<QuizSubmission | null>(null);
+  const [notificationToast, setNotificationToast] = useState<string | null>(null);
 
   if (!activeQuiz) return null;
 
@@ -28,6 +33,13 @@ export const QuizAnalyze: React.FC = () => {
     if (a.durationSeconds !== b.durationSeconds) return a.durationSeconds - b.durationSeconds;
     return new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime();
   });
+
+  const showToast = (msg: string) => {
+    setNotificationToast(msg);
+    setTimeout(() => {
+      setNotificationToast((current) => (current === msg ? null : current));
+    }, 3500);
+  };
 
   // Statistics calculation
   const totalSubmissions = quizSubmissions.length;
@@ -56,9 +68,24 @@ export const QuizAnalyze: React.FC = () => {
     return `${mins}m ${secs}s`;
   };
 
+  const handleConfirmClearAll = () => {
+    clearQuizSubmissions(activeQuiz.id);
+    setIsClearAllModalOpen(false);
+    showToast(`Berhasil menghapus seluruh data respon (${totalSubmissions} data mahasiswa).`);
+  };
+
+  const handleConfirmDeleteSingle = () => {
+    if (submissionToDelete) {
+      const name = submissionToDelete.respondent.name;
+      deleteSubmission(submissionToDelete.id);
+      setSubmissionToDelete(null);
+      showToast(`Data pengerjaan mahasiswa "${name}" telah dihapus.`);
+    }
+  };
+
   const handleExportCSV = () => {
     if (quizSubmissions.length === 0) {
-      alert('Belum ada data pengerjaan kuis untuk diekspor.');
+      showToast('Belum ada data pengerjaan kuis untuk diekspor.');
       return;
     }
 
@@ -86,17 +113,32 @@ export const QuizAnalyze: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    showToast('File CSV berhasil diunduh.');
   };
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto space-y-8">
+    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto space-y-8 relative">
       
+      {/* Floating Notification Toast */}
+      {notificationToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-700 flex items-center space-x-3 text-xs font-semibold animate-in fade-in slide-in-from-bottom-5">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{notificationToast}</span>
+          <button 
+            onClick={() => setNotificationToast(null)}
+            className="text-slate-400 hover:text-white p-0.5 rounded"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Header & Export Action */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
             <BarChart2 className="w-5 h-5 text-indigo-600" />
-            Laporan & Analisis Nilai Siswa
+            Laporan & Analisis Nilai Mahasiswa
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Analisis rekap skor, statistik kelulusan, dan lembar jawaban per butir soal.
@@ -106,22 +148,19 @@ export const QuizAnalyze: React.FC = () => {
         <div className="flex items-center space-x-2">
           {quizSubmissions.length > 0 && (
             <button
-              onClick={() => {
-                if (confirm('Hapus seluruh riwayat pengerjaan kuis ini?')) {
-                  clearQuizSubmissions(activeQuiz.id);
-                }
-              }}
-              className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-rose-50 text-slate-600 hover:text-rose-600 text-xs font-semibold flex items-center gap-1.5 transition"
+              onClick={() => setIsClearAllModalOpen(true)}
+              className="px-3.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold flex items-center gap-1.5 transition shadow-2xs cursor-pointer active:scale-95"
+              title="Hapus seluruh data riwayat ujian ini"
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Hapus Data</span>
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <span>Hapus Data ({totalSubmissions})</span>
             </button>
           )}
 
           <button
             onClick={handleExportCSV}
             disabled={quizSubmissions.length === 0}
-            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold flex items-center space-x-1.5 shadow-xs transition"
+            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold flex items-center space-x-1.5 shadow-xs transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Unduh CSV (Excel)</span>
@@ -155,25 +194,34 @@ export const QuizAnalyze: React.FC = () => {
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="text-2xl font-black text-emerald-600">{passRate}%</div>
-          <p className="text-[11px] text-slate-400 mt-0.5">{passedSubmissions} dari {totalSubmissions} siswa lulus</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">{passedSubmissions} dari {totalSubmissions} mahasiswa lulus</p>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Rata-Rata Durasi</span>
-            <Clock className="w-4 h-4 text-purple-600" />
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Rerata Durasi</span>
+            <Clock className="w-4 h-4 text-slate-600" />
           </div>
-          <div className="text-2xl font-black text-slate-900">{formatDuration(avgDurationSeconds)}</div>
-          <p className="text-[11px] text-slate-400 mt-0.5">Batas: {activeQuiz.settings.timeLimitMinutes || '∞'} m</p>
+          <div className="text-2xl font-black text-slate-900 font-mono">
+            {formatDuration(avgDurationSeconds)}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-0.5">Batas: {activeQuiz.settings.timeLimitMinutes || 'Bebas'} mnt</p>
         </div>
       </div>
 
       {/* Submissions Table */}
       <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-            Daftar Respon Siswa ({quizSubmissions.length})
-          </h3>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center space-x-2">
+            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+              Daftar Respon Mahasiswa ({quizSubmissions.length})
+            </h3>
+            {quizSubmissions.length > 0 && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-bold">
+                Tersedia {quizSubmissions.length} Data
+              </span>
+            )}
+          </div>
           <span className="text-xs text-slate-500">
             Passing Score: <strong className="text-slate-800">{activeQuiz.settings.passingPercentage}%</strong>
           </span>
@@ -184,7 +232,7 @@ export const QuizAnalyze: React.FC = () => {
             <FileSpreadsheet className="w-12 h-12 mx-auto mb-2 text-slate-300" />
             <p className="text-sm font-semibold text-slate-600">Belum ada data pengerjaan ujian</p>
             <p className="text-xs text-slate-400 mt-1">
-              Bagikan link ujian atau klik tombol &ldquo;Mulai Tes (Siswa)&rdquo; di atas untuk melakukan simulasi.
+              Data respon telah kosong. Bagikan link ujian atau klik tombol &ldquo;Uji Soal (Siswa)&rdquo; di atas untuk melakukan simulasi.
             </p>
           </div>
         ) : (
@@ -265,19 +313,15 @@ export const QuizAnalyze: React.FC = () => {
                     <td className="px-4 py-3.5 text-right space-x-1 whitespace-nowrap">
                       <button
                         onClick={() => setSelectedSubmission(sub)}
-                        className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                        className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition cursor-pointer"
                         title="Lihat Lembar Jawaban Lengkap"
                       >
                         <Eye className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => {
-                          if (confirm(`Hapus data ${sub.respondent.name}?`)) {
-                            deleteSubmission(sub.id);
-                          }
-                        }}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                        title="Hapus Submission Ini"
+                        onClick={() => setSubmissionToDelete(sub)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                        title="Hapus Data Mahasiswa Ini"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -289,6 +333,81 @@ export const QuizAnalyze: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Confirmation Modal: Clear ALL Submissions */}
+      {isClearAllModalOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-6">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">
+                Hapus Seluruh Data Respon Ujian?
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Tindakan ini akan menghapus <strong>{totalSubmissions} data pengerjaan</strong> mahasiswa pada kuis <em>&ldquo;{activeQuiz.settings.title}&rdquo;</em>. Rekap nilai dan statistik kelulusan akan direset menjadi kosong.
+              </p>
+
+              <div className="mt-6 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsClearAllModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmClearAll}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Ya, Hapus Semua Data</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete SINGLE Submission */}
+      {submissionToDelete && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-6">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">
+                Hapus Data Mahasiswa Ini?
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Anda akan menghapus data pengerjaan milik: <br />
+                <strong className="text-slate-900 font-bold">{submissionToDelete.respondent.name}</strong> 
+                {submissionToDelete.respondent.studentId ? ` (${submissionToDelete.respondent.studentId})` : ''} dengan skor <strong>{submissionToDelete.percentage}%</strong>.
+              </p>
+
+              <div className="mt-6 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setSubmissionToDelete(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteSingle}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition cursor-pointer active:scale-95"
+                >
+                  Hapus Data Ini
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Individual Submission Response Sheet Modal */}
       {selectedSubmission && (
@@ -307,7 +426,7 @@ export const QuizAnalyze: React.FC = () => {
               </div>
               <button
                 onClick={() => setSelectedSubmission(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -367,7 +486,7 @@ export const QuizAnalyze: React.FC = () => {
                           
                           <div className="mt-2 space-y-1 text-xs">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-slate-500">Jawaban Peserta:</span>
+                              <span className="text-slate-500">Jawaban Mahasiswa:</span>
                               <span className={`font-bold ${res.isCorrect ? 'text-emerald-800' : 'text-rose-800'}`}>
                                 {typeof res.userAnswer === 'object' ? JSON.stringify(res.userAnswer) : String(res.userAnswer || '(Tidak Dijawab)')}
                               </span>
@@ -403,7 +522,7 @@ export const QuizAnalyze: React.FC = () => {
             <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-end">
               <button
                 onClick={() => setSelectedSubmission(null)}
-                className="px-4 py-1.5 text-xs font-semibold bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg transition"
+                className="px-4 py-1.5 text-xs font-semibold bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg transition cursor-pointer"
               >
                 Tutup
               </button>
