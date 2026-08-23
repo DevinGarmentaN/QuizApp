@@ -1,0 +1,6 @@
+{
+  "name": "FlexiTest - Quiz Maker & Online Exam Platform",
+  "description": "Platform pembuatan kuis & ujian online mirip FlexiQuiz dengan berbagai tipe soal, konfigurasi tes lengkap, link sharing, live test player, dan analitik hasil.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
