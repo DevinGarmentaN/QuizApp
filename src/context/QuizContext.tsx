@@ -58,11 +58,13 @@ interface QuizContextType {
   setAppMode: (mode: 'admin' | 'taker') => void;
   setTakingQuizId: (id: string | null) => void;
   
-  // Quiz CRUD
+  // Quiz CRUD & Cloud Sync
   createQuiz: (title?: string, description?: string) => string;
   updateQuizSettings: (quizId: string, settings: Partial<QuizSettings>) => void;
   deleteQuiz: (quizId: string) => void;
   duplicateQuiz: (quizId: string) => string;
+  persistQuizToCloud: (quizToSave: Quiz) => Promise<boolean>;
+  syncQuizToCloud: (quizId: string) => Promise<boolean>;
   
   // Page operations
   addPage: (quizId: string, title?: string) => void;
@@ -235,6 +237,25 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
+  // Helper to persist quiz update to Cloud Firestore safely
+  const persistQuizToCloud = async (quizToSave: Quiz): Promise<boolean> => {
+    try {
+      ensureAuth();
+      const sanitized = sanitizeForFirestore(quizToSave);
+      await setDoc(doc(db, 'quizzes', quizToSave.id), sanitized, { merge: true });
+      return true;
+    } catch (e) {
+      console.error('Could not persist quiz to Firestore:', e);
+      return false;
+    }
+  };
+
+  const syncQuizToCloud = async (quizId: string): Promise<boolean> => {
+    const target = quizzes.find((q) => q.id === quizId);
+    if (!target) return false;
+    return await persistQuizToCloud(target);
+  };
+
   // Sync Quizzes from Cloud Firestore so quizzes created on one device appear everywhere
   useEffect(() => {
     const quizzesRef = collection(db, 'quizzes');
@@ -262,12 +283,12 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (dbQuizIdx >= 0) {
             if (cloudQuizzes[dbQuizIdx].questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
               cloudQuizzes[dbQuizIdx] = DEFAULT_DATABASE_QUIZ;
-              setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), sanitizeForFirestore(DEFAULT_DATABASE_QUIZ)).catch(console.warn);
+              persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
             }
           } else {
             // Seed DEFAULT_DATABASE_QUIZ if not present in collection
             cloudQuizzes.unshift(DEFAULT_DATABASE_QUIZ);
-            setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), sanitizeForFirestore(DEFAULT_DATABASE_QUIZ)).catch(console.warn);
+            persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
           }
 
           // Check if quiz-1787487557515 (DA) in cloud has fewer questions or is missing
@@ -275,24 +296,34 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (daQuizIdx >= 0) {
             if (cloudQuizzes[daQuizIdx].questions.length < DEFAULT_DA_QUIZ.questions.length) {
               cloudQuizzes[daQuizIdx] = DEFAULT_DA_QUIZ;
-              setDoc(doc(db, 'quizzes', DEFAULT_DA_QUIZ.id), sanitizeForFirestore(DEFAULT_DA_QUIZ)).catch(console.warn);
+              persistQuizToCloud(DEFAULT_DA_QUIZ);
             }
           } else {
             // Seed DEFAULT_DA_QUIZ if not present in collection
             cloudQuizzes.splice(1, 0, DEFAULT_DA_QUIZ);
-            setDoc(doc(db, 'quizzes', DEFAULT_DA_QUIZ.id), sanitizeForFirestore(DEFAULT_DA_QUIZ)).catch(console.warn);
+            persistQuizToCloud(DEFAULT_DA_QUIZ);
           }
 
-          if (cloudQuizzes.length > 0) {
-            setQuizzes(cloudQuizzes);
-          }
+          // Safely merge with existing local quizzes so newly created local quizzes are never wiped out
+          setQuizzes((prevLocalQuizzes) => {
+            const merged = [...cloudQuizzes];
+            prevLocalQuizzes.forEach((localQ) => {
+              const inCloudIdx = merged.findIndex((cq) => cq.id === localQ.id);
+              if (inCloudIdx === -1) {
+                // Local quiz not yet in cloud list -> keep it and upload it!
+                merged.push(localQ);
+                persistQuizToCloud(localQ);
+              }
+            });
+            return merged;
+          });
         } else if (isInitialLoad) {
           // If Firestore quizzes collection is empty, seed initial default quizzes to cloud
           const seedBatch = async () => {
             try {
-              await setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), sanitizeForFirestore(DEFAULT_DATABASE_QUIZ));
-              await setDoc(doc(db, 'quizzes', DEFAULT_DA_QUIZ.id), sanitizeForFirestore(DEFAULT_DA_QUIZ));
-              await setDoc(doc(db, 'quizzes', SAMPLE_MULTI_TYPE_QUIZ.id), sanitizeForFirestore(SAMPLE_MULTI_TYPE_QUIZ));
+              await persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
+              await persistQuizToCloud(DEFAULT_DA_QUIZ);
+              await persistQuizToCloud(SAMPLE_MULTI_TYPE_QUIZ);
             } catch (err) {
               console.warn('Error seeding default quizzes to Firestore:', err);
             }
@@ -317,17 +348,6 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Failed to save quizzes', e);
     }
   }, [quizzes]);
-
-  // Helper to persist quiz update to Cloud Firestore safely
-  const persistQuizToCloud = async (quizToSave: Quiz) => {
-    try {
-      await ensureAuth();
-      const sanitized = sanitizeForFirestore(quizToSave);
-      await setDoc(doc(db, 'quizzes', quizToSave.id), sanitized);
-    } catch (e) {
-      console.error('Could not persist quiz to Firestore:', e);
-    }
-  };
 
   const activeQuiz = quizzes.find((q) => q.id === activeQuizId) || quizzes[0];
 
@@ -871,6 +891,8 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateQuizSettings,
         deleteQuiz,
         duplicateQuiz,
+        persistQuizToCloud,
+        syncQuizToCloud,
         addPage,
         updatePage,
         deletePage,

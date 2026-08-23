@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuiz } from '../../context/QuizContext';
 import { 
   Share2, 
@@ -13,15 +13,29 @@ import {
   PlayCircle,
   Code,
   Sparkles,
-  Download
+  Download,
+  Cloud,
+  CloudCheck,
+  RefreshCw
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
 export const QuizPublish: React.FC = () => {
-  const { activeQuiz, updateQuizSettings, setTakingQuizId, setAppMode } = useQuiz();
+  const { activeQuiz, updateQuizSettings, setTakingQuizId, setAppMode, persistQuizToCloud } = useQuiz();
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedEmbed, setCopiedEmbed] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState(false);
+
+  // Auto-sync active quiz to cloud when this screen is viewed to ensure direct links are always valid
+  useEffect(() => {
+    if (activeQuiz) {
+      persistQuizToCloud(activeQuiz).then(() => {
+        setSyncSuccess(true);
+      });
+    }
+  }, [activeQuiz?.id]);
 
   if (!activeQuiz) return null;
 
@@ -29,39 +43,78 @@ export const QuizPublish: React.FC = () => {
   const shareableUrl = `${currentOrigin}/#quiz=${activeQuiz.id}`;
   const embedSnippet = `<iframe src="${shareableUrl}" width="100%" height="800" frameborder="0"></iframe>`;
 
-  const handleCopyLink = () => {
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    const success = await persistQuizToCloud(activeQuiz);
+    setIsSyncing(false);
+    if (success) {
+      setSyncSuccess(true);
+      setTimeout(() => setSyncSuccess(false), 3000);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    // Ensure cloud sync is triggered when copying link
+    persistQuizToCloud(activeQuiz);
     navigator.clipboard.writeText(shareableUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
   const handleCopyEmbed = () => {
+    persistQuizToCloud(activeQuiz);
     navigator.clipboard.writeText(embedSnippet);
     setCopiedEmbed(true);
     setTimeout(() => setCopiedEmbed(false), 2000);
   };
 
-  const handleLaunchLiveTest = () => {
+  const handleLaunchLiveTest = async () => {
+    await persistQuizToCloud(activeQuiz);
     setTakingQuizId(activeQuiz.id);
     setAppMode('taker');
   };
 
-  const handleStatusChange = (newStatus: 'in_design' | 'published' | 'closed') => {
+  const handleStatusChange = async (newStatus: 'in_design' | 'published' | 'closed') => {
     updateQuizSettings(activeQuiz.id, { status: newStatus });
+    const updated = {
+      ...activeQuiz,
+      settings: { ...activeQuiz.settings, status: newStatus },
+      updatedAt: new Date().toISOString(),
+    };
+    await persistQuizToCloud(updated);
+    setSyncSuccess(true);
   };
 
   return (
     <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto space-y-8">
       
-      {/* Header */}
-      <div>
-        <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
-          <Share2 className="w-5 h-5 text-indigo-600" />
-          Publikasi & Bagikan Kuis
-        </h2>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Bagikan link ujian kepada siswa melalui tautan langsung, kode QR di proyektor kelas, atau sematkan ke LMS.
-        </p>
+      {/* Header & Cloud Sync Badge */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+            <Share2 className="w-5 h-5 text-indigo-600" />
+            Publikasi & Bagikan Kuis
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Bagikan link ujian kepada siswa melalui tautan langsung, kode QR di proyektor kelas, atau sematkan ke LMS.
+          </p>
+        </div>
+
+        {/* Cloud Readiness Status */}
+        <div className="flex items-center space-x-2">
+          <div className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold">
+            <Check className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Tersimpan di Cloud Database</span>
+          </div>
+          <button
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className="p-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium transition flex items-center gap-1 cursor-pointer"
+            title="Sinkronkan kuis ke cloud sekarang"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-indigo-600' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Status Controller Card */}
@@ -91,7 +144,7 @@ export const QuizPublish: React.FC = () => {
           <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
             <button
               onClick={() => handleStatusChange('in_design')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
                 activeQuiz.settings.status === 'in_design'
                   ? 'bg-white text-slate-900 shadow-xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
@@ -101,7 +154,7 @@ export const QuizPublish: React.FC = () => {
             </button>
             <button
               onClick={() => handleStatusChange('published')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
                 activeQuiz.settings.status === 'published'
                   ? 'bg-emerald-600 text-white shadow-xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
@@ -111,7 +164,7 @@ export const QuizPublish: React.FC = () => {
             </button>
             <button
               onClick={() => handleStatusChange('closed')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
                 activeQuiz.settings.status === 'closed'
                   ? 'bg-rose-600 text-white shadow-xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
@@ -128,18 +181,23 @@ export const QuizPublish: React.FC = () => {
         
         {/* Link Share */}
         <div className="space-y-2">
-          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-            Tautan Pengerjaan Ujian (Direct Test Link)
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Tautan Pengerjaan Ujian (Direct Test Link)
+            </label>
+            <span className="text-[11px] font-medium text-slate-500">
+              Quiz ID: <span className="font-mono text-indigo-600 font-semibold">{activeQuiz.id}</span>
+            </span>
+          </div>
           <div className="flex items-center gap-2">
             <div className="flex-1 flex items-center bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-700 font-mono text-xs overflow-x-auto">
               <Globe className="w-4 h-4 text-indigo-600 shrink-0 mr-2" />
-              <span className="truncate">{shareableUrl}</span>
+              <span className="truncate select-all">{shareableUrl}</span>
             </div>
 
             <button
               onClick={handleCopyLink}
-              className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition shrink-0 ${
+              className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition shrink-0 cursor-pointer ${
                 copiedLink
                   ? 'bg-emerald-600 text-white'
                   : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs'
@@ -149,9 +207,19 @@ export const QuizPublish: React.FC = () => {
               <span>{copiedLink ? 'Tersalin!' : 'Salin Link'}</span>
             </button>
 
+            <a
+              href={shareableUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 transition flex items-center justify-center shrink-0"
+              title="Buka tautan di tab baru"
+            >
+              <ExternalLink className="w-4 h-4 text-slate-600" />
+            </a>
+
             <button
               onClick={() => setShowQrModal(true)}
-              className="p-2 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 transition"
+              className="p-2 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 transition shrink-0 cursor-pointer"
               title="Tampilkan QR Code"
             >
               <QrCode className="w-4 h-4" />

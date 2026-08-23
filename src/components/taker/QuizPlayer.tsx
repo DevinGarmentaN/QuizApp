@@ -38,16 +38,41 @@ interface QuizPlayerProps {
 }
 
 export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
-  const { quizzes, submissions, submitQuizResult, currentUser } = useQuiz();
+  const { quizzes, submissions, submitQuizResult, currentUser, persistQuizToCloud } = useQuiz();
 
-  const [cloudQuiz, setCloudQuiz] = useState<Quiz | null>(null);
-  const [isLoadingQuiz, setIsLoadingQuiz] = useState<boolean>(true);
+  const [cloudQuiz, setCloudQuiz] = useState<Quiz | null>(() => {
+    // Immediate check in memory & localStorage to prevent flash of not-found
+    if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
+      return DEFAULT_DATABASE_QUIZ;
+    }
+    if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14' || quizId.includes('1787487557515')) {
+      return DEFAULT_DA_QUIZ;
+    }
+    const memFound = quizzes.find((q) => q.id === quizId);
+    if (memFound) return memFound;
+    try {
+      const saved = localStorage.getItem('flexitest_quizzes_v2');
+      if (saved) {
+        const list = JSON.parse(saved) as Quiz[];
+        const localFound = list.find((q) => q.id === quizId);
+        if (localFound) return localFound;
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+    return null;
+  });
+
+  const [isLoadingQuiz, setIsLoadingQuiz] = useState<boolean>(!cloudQuiz);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Directly subscribe to this specific quiz in Cloud Firestore for real-time fresh updates
   useEffect(() => {
     let isMounted = true;
-    setIsLoadingQuiz(true);
+    if (!cloudQuiz) {
+      setIsLoadingQuiz(true);
+    }
     setLoadError(null);
 
     ensureAuth();
@@ -65,10 +90,10 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
             // Check if DEFAULT_DATABASE_QUIZ or DEFAULT_DA_QUIZ needs to be updated to 25 questions
             if (data.id === DEFAULT_DATABASE_QUIZ.id && data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
               setCloudQuiz(DEFAULT_DATABASE_QUIZ);
-              setDoc(quizDocRef, JSON.parse(JSON.stringify(DEFAULT_DATABASE_QUIZ))).catch(console.warn);
+              persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
             } else if (data.id === DEFAULT_DA_QUIZ.id && data.questions.length < DEFAULT_DA_QUIZ.questions.length) {
               setCloudQuiz(DEFAULT_DA_QUIZ);
-              setDoc(quizDocRef, JSON.parse(JSON.stringify(DEFAULT_DA_QUIZ))).catch(console.warn);
+              persistQuizToCloud(DEFAULT_DA_QUIZ);
             } else {
               setCloudQuiz(data);
             }
@@ -76,32 +101,51 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
           }
         } else {
           // If not found in cloud, check default or local context fallback
-          if (quizId === DEFAULT_DATABASE_QUIZ.id) {
+          if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
             setCloudQuiz(DEFAULT_DATABASE_QUIZ);
-            setDoc(quizDocRef, JSON.parse(JSON.stringify(DEFAULT_DATABASE_QUIZ))).catch(console.warn);
-          } else if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14') {
+            persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
+            setIsLoadingQuiz(false);
+          } else if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14' || quizId.includes('1787487557515')) {
             setCloudQuiz(DEFAULT_DA_QUIZ);
-            setDoc(doc(db, 'quizzes', DEFAULT_DA_QUIZ.id), JSON.parse(JSON.stringify(DEFAULT_DA_QUIZ))).catch(console.warn);
+            persistQuizToCloud(DEFAULT_DA_QUIZ);
+            setIsLoadingQuiz(false);
           } else {
             const localFallback = quizzes.find((q) => q.id === quizId);
             if (localFallback) {
               setCloudQuiz(localFallback);
+              persistQuizToCloud(localFallback);
+              setIsLoadingQuiz(false);
             } else {
-              setLoadError('Kuis dengan kode ini tidak ditemukan pada server.');
+              try {
+                const saved = localStorage.getItem('flexitest_quizzes_v2');
+                if (saved) {
+                  const list = JSON.parse(saved) as Quiz[];
+                  const storageFallback = list.find((q) => q.id === quizId);
+                  if (storageFallback) {
+                    setCloudQuiz(storageFallback);
+                    persistQuizToCloud(storageFallback);
+                    setIsLoadingQuiz(false);
+                    return;
+                  }
+                }
+              } catch (e) {
+                console.warn(e);
+              }
+              setLoadError('Kuis dengan kode ini belum tersedia di cloud database.');
+              setIsLoadingQuiz(false);
             }
           }
-          setIsLoadingQuiz(false);
         }
       },
       (error) => {
         console.warn('Real-time quiz fetch warning:', error);
         if (!isMounted) return;
-        if (quizId === DEFAULT_DATABASE_QUIZ.id) {
+        if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
           setCloudQuiz(DEFAULT_DATABASE_QUIZ);
           setIsLoadingQuiz(false);
           return;
         }
-        if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14') {
+        if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14' || quizId.includes('1787487557515')) {
           setCloudQuiz(DEFAULT_DA_QUIZ);
           setIsLoadingQuiz(false);
           return;
@@ -119,28 +163,22 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
                 setCloudQuiz(data);
               }
             } else {
-              if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14') {
-                setCloudQuiz(DEFAULT_DA_QUIZ);
+              const localFallback = quizzes.find((q) => q.id === quizId);
+              if (localFallback) {
+                setCloudQuiz(localFallback);
+                persistQuizToCloud(localFallback);
               } else {
-                const localFallback = quizzes.find((q) => q.id === quizId);
-                if (localFallback) {
-                  setCloudQuiz(localFallback);
-                } else {
-                  setLoadError('Gagal memuat kuis dari server cloud.');
-                }
+                setLoadError('Gagal memuat kuis dari server cloud.');
               }
             }
           })
           .catch(() => {
-            if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14') {
-              setCloudQuiz(DEFAULT_DA_QUIZ);
+            const localFallback = quizzes.find((q) => q.id === quizId);
+            if (localFallback) {
+              setCloudQuiz(localFallback);
+              persistQuizToCloud(localFallback);
             } else {
-              const localFallback = quizzes.find((q) => q.id === quizId);
-              if (localFallback) {
-                setCloudQuiz(localFallback);
-              } else {
-                setLoadError('Koneksi terputus atau kuis tidak ditemukan.');
-              }
+              setLoadError('Koneksi terputus atau kuis tidak ditemukan.');
             }
           })
           .finally(() => {
@@ -153,7 +191,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
       isMounted = false;
       unsubscribe();
     };
-  }, [quizId, quizzes]);
+  }, [quizId, retryCount]);
 
   // Use the cloud quiz as the ultimate source of truth, or context match as fallback
   const quiz = useMemo(() => {
@@ -404,23 +442,69 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
   if (!quiz) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
-        <div className="bg-slate-800/90 border border-slate-700 p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-md w-full text-center space-y-4 animate-in fade-in">
-          <AlertCircle className="w-12 h-12 text-rose-400" />
+        <div className="bg-slate-800/90 border border-slate-700 p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-lg w-full text-center space-y-5 animate-in fade-in">
+          <div className="w-14 h-14 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+
           <div>
             <h3 className="font-bold text-lg text-slate-100">Kuis Tidak Ditemukan</h3>
-            <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+            <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
               {loadError || `Kuis dengan kode "${quizId}" belum tersedia di database atau link ujian yang Anda buka tidak valid.`}
             </p>
             <p className="text-[11px] text-slate-400 mt-2">
               Silakan pastikan dosen pengajar telah mempublikasikan kuis atau periksa kembali link yang dibagikan.
             </p>
           </div>
-          <button
-            onClick={onExit}
-            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
-          >
-            Kembali ke Halaman Utama
-          </button>
+
+          {/* Quick links to available default quizzes */}
+          <div className="w-full bg-slate-900/70 border border-slate-700/80 rounded-xl p-3 text-left space-y-2">
+            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+              Kuis Ujian yang Tersedia:
+            </div>
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.hash = `#quiz=${DEFAULT_DA_QUIZ.id}`;
+                  window.location.reload();
+                }}
+                className="w-full text-left px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition flex items-center justify-between cursor-pointer"
+              >
+                <span className="truncate">QUIZ DA Pertemuan 14 - Desain & Analisis Algoritma (25 Soal)</span>
+                <span className="text-[10px] text-indigo-400 ml-2 shrink-0">Buka ➔</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.hash = `#quiz=${DEFAULT_DATABASE_QUIZ.id}`;
+                  window.location.reload();
+                }}
+                className="w-full text-left px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition flex items-center justify-between cursor-pointer"
+              >
+                <span className="truncate">QUIZ Pertemuan 14 - Basis Data & SQL (25 Soal)</span>
+                <span className="text-[10px] text-indigo-400 ml-2 shrink-0">Buka ➔</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-center space-x-3 w-full pt-1">
+            <button
+              onClick={() => {
+                setIsLoadingQuiz(true);
+                setRetryCount((prev) => prev + 1);
+              }}
+              className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-bold transition cursor-pointer"
+            >
+              Coba Muat Ulang
+            </button>
+            <button
+              onClick={onExit}
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
+            >
+              Kembali ke Dashboard
+            </button>
+          </div>
         </div>
       </div>
     );
