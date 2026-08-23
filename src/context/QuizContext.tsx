@@ -70,7 +70,8 @@ interface QuizContextType {
   deletePage: (quizId: string, pageId: string) => void;
   
   // Question operations
-  addQuestion: (quizId: string, pageId: string, type?: QuestionType) => string;
+  addQuestion: (quizId: string, pageId: string, type?: QuestionType, initialData?: Partial<Question>) => string;
+  addMultipleQuestions: (quizId: string, newQuestions: Question[]) => void;
   updateQuestion: (quizId: string, questionId: string, data: Partial<Question>) => void;
   deleteQuestion: (quizId: string, questionId: string) => void;
   duplicateQuestion: (quizId: string, questionId: string) => void;
@@ -90,6 +91,13 @@ interface QuizContextType {
 const STORAGE_KEY_QUIZZES = 'flexitest_quizzes_v2';
 const STORAGE_KEY_AUTH = 'flexitest_auth_user_v1';
 const DUMMY_SUBMISSION_IDS = new Set(['sub-1', 'sub-2', 'sub-3', 'sub-4', 'sub-5', 'sub-6']);
+
+// Helper to sanitize data by removing undefined fields for Firebase Firestore
+const sanitizeForFirestore = <T,>(obj: T): T => {
+  return JSON.parse(
+    JSON.stringify(obj, (_, val) => (val === undefined ? null : val))
+  );
+};
 
 const QuizContext = createContext<QuizContextType | undefined>(undefined);
 
@@ -174,9 +182,16 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Sync Quizzes from Cloud Firestore so quizzes created on one device appear everywhere
   useEffect(() => {
     const quizzesRef = collection(db, 'quizzes');
+    let isInitialLoad = true;
+
     const unsubscribe = onSnapshot(
       quizzesRef,
       (snapshot) => {
+        // If snapshot comes from a pending local write, skip replacing local state to avoid race condition
+        if (snapshot.metadata.hasPendingWrites) {
+          return;
+        }
+
         if (!snapshot.empty) {
           const cloudQuizzes: Quiz[] = [];
           snapshot.forEach((docSnap) => {
@@ -188,18 +203,19 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (cloudQuizzes.length > 0) {
             setQuizzes(cloudQuizzes);
           }
-        } else {
+        } else if (isInitialLoad) {
           // If Firestore quizzes collection is empty, seed initial default quizzes to cloud
           const seedBatch = async () => {
             try {
-              await setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), DEFAULT_DATABASE_QUIZ);
-              await setDoc(doc(db, 'quizzes', SAMPLE_MULTI_TYPE_QUIZ.id), SAMPLE_MULTI_TYPE_QUIZ);
+              await setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), sanitizeForFirestore(DEFAULT_DATABASE_QUIZ));
+              await setDoc(doc(db, 'quizzes', SAMPLE_MULTI_TYPE_QUIZ.id), sanitizeForFirestore(SAMPLE_MULTI_TYPE_QUIZ));
             } catch (err) {
               console.warn('Error seeding default quizzes to Firestore:', err);
             }
           };
           seedBatch();
         }
+        isInitialLoad = false;
       },
       (error) => {
         console.warn('Quizzes sync warning:', error);
@@ -218,12 +234,14 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [quizzes]);
 
-  // Helper to persist quiz update to Cloud Firestore
+  // Helper to persist quiz update to Cloud Firestore safely
   const persistQuizToCloud = async (quizToSave: Quiz) => {
     try {
-      await setDoc(doc(db, 'quizzes', quizToSave.id), quizToSave);
+      await ensureAuth();
+      const sanitized = sanitizeForFirestore(quizToSave);
+      await setDoc(doc(db, 'quizzes', quizToSave.id), sanitized);
     } catch (e) {
-      console.warn('Could not persist quiz to Firestore:', e);
+      console.error('Could not persist quiz to Firestore:', e);
     }
   };
 
@@ -414,8 +432,13 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
-  const addQuestion = (quizId: string, pageId: string, type: QuestionType = 'single_choice') => {
-    const newQuestionId = 'q-' + Date.now();
+  const addQuestion = (
+    quizId: string,
+    pageId: string,
+    type: QuestionType = 'single_choice',
+    initialData?: Partial<Question>
+  ) => {
+    const newQuestionId = initialData?.id || 'q-' + Date.now();
     let defaultOptions: OptionItem[] = [];
 
     if (type === 'single_choice' || type === 'multiple_choice') {
@@ -432,24 +455,32 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ];
     }
 
+    const questionType = initialData?.type || type;
     const newQuestion: Question = {
       id: newQuestionId,
-      type,
-      title: 'Tuliskan teks pertanyaan di sini...',
-      points: 10,
-      isRequired: true,
+      type: questionType,
+      title: initialData?.title || 'Tuliskan teks pertanyaan di sini...',
+      description: initialData?.description || '',
+      points: initialData?.points !== undefined ? Number(initialData.points) : 10,
+      isRequired: initialData?.isRequired !== undefined ? initialData.isRequired : true,
       pageId,
-      explanation: '',
-      options: defaultOptions,
+      explanation: initialData?.explanation || '',
+      hint: initialData?.hint || '',
+      shuffleOptions: initialData?.shuffleOptions ?? false,
+      caseSensitive: initialData?.caseSensitive ?? false,
+      options: initialData?.options && initialData.options.length > 0 ? initialData.options : defaultOptions,
       matchingPairs:
-        type === 'matching'
-          ? [
+        questionType === 'matching'
+          ? (initialData?.matchingPairs || [
               { id: 'm1', leftText: 'Konsep A', rightText: 'Definisi A' },
               { id: 'm2', leftText: 'Konsep B', rightText: 'Definisi B' },
               { id: 'm3', leftText: 'Konsep C', rightText: 'Definisi C' },
-            ]
+            ])
           : undefined,
-      correctAnswers: type === 'short_answer' || type === 'fill_blank' ? ['jawaban benar'] : undefined,
+      correctAnswers:
+        questionType === 'short_answer' || questionType === 'fill_blank'
+          ? (initialData?.correctAnswers || ['jawaban benar'])
+          : undefined,
     };
 
     setQuizzes((prev) =>
@@ -466,6 +497,21 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
 
     return newQuestionId;
+  };
+
+  const addMultipleQuestions = (quizId: string, newQuestions: Question[]) => {
+    setQuizzes((prev) =>
+      prev.map((q) => {
+        if (q.id !== quizId) return q;
+        const updated: Quiz = {
+          ...q,
+          questions: [...q.questions, ...newQuestions],
+          updatedAt: new Date().toISOString(),
+        };
+        persistQuizToCloud(updated);
+        return updated;
+      })
+    );
   };
 
   const updateQuestion = (quizId: string, questionId: string, data: Partial<Question>) => {
@@ -576,8 +622,9 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 2. Persist to Firestore
     try {
       await ensureAuth();
+      const sanitized = sanitizeForFirestore(submission);
       const submissionDocRef = doc(db, 'submissions', submission.id);
-      await setDoc(submissionDocRef, submission);
+      await setDoc(submissionDocRef, sanitized);
     } catch (err) {
       console.error('Error submitting quiz result to Firebase Firestore:', err);
     }
@@ -650,7 +697,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const loggedUser: AuthUser = {
       id: PRIMARY_INSTRUCTOR.id,
-      name: PRIMARY_INSTRUCTOR.name, // Primary requested instructor name
+      name: PRIMARY_INSTRUCTOR.name,
       email: inputEmail || PRIMARY_INSTRUCTOR.email,
       role: 'dosen',
       institution: PRIMARY_INSTRUCTOR.institution,
@@ -744,6 +791,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updatePage,
         deletePage,
         addQuestion,
+        addMultipleQuestions,
         updateQuestion,
         deleteQuestion,
         duplicateQuestion,
