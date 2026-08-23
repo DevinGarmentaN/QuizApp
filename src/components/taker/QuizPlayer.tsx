@@ -22,7 +22,10 @@ import {
   Send,
   Trophy,
   FileText,
-  Users
+  Users,
+  ZoomIn,
+  X,
+  Image as ImageIcon
 } from 'lucide-react';
 
 interface QuizPlayerProps {
@@ -57,6 +60,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
   const [timeRemainingSeconds, setTimeRemainingSeconds] = useState<number>(0);
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [completedSubmission, setCompletedSubmission] = useState<QuizSubmission | null>(null);
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   // Shuffled questions and options prepared on start
   const preparedQuestions = useMemo(() => {
@@ -215,6 +219,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
         score: earnedScore,
         maxScore: qPoints,
         explanation: q.explanation,
+        imageUrl: q.imageUrl,
       });
     });
 
@@ -504,8 +509,8 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
                 </button>
               </div>
 
-              {/* Question Title */}
-              <div className="space-y-2">
+              {/* Question Title & Media */}
+              <div className="space-y-3">
                 <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-relaxed">
                   {currentQ.title}
                 </h3>
@@ -513,6 +518,26 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
                   <p className="text-xs text-slate-500 italic">
                     {currentQ.description}
                   </p>
+                )}
+
+                {/* Question Image Attachment */}
+                {currentQ.imageUrl && (
+                  <div className="relative group/img rounded-xl overflow-hidden border border-slate-200 bg-slate-50 p-2 inline-block max-w-full">
+                    <img
+                      src={currentQ.imageUrl}
+                      alt="Gambar Soal"
+                      className="max-h-72 sm:max-h-80 w-auto rounded-lg object-contain cursor-zoom-in"
+                      onClick={() => setZoomedImage(currentQ.imageUrl || null)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setZoomedImage(currentQ.imageUrl || null)}
+                      className="absolute bottom-4 right-4 bg-slate-900/80 hover:bg-slate-900 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-md flex items-center gap-1.5 backdrop-blur-xs transition"
+                    >
+                      <ZoomIn className="w-3.5 h-3.5" />
+                      <span>Perbesar Gambar</span>
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -833,6 +858,30 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
           </div>
         )}
 
+        {/* Lightbox Zoom Modal */}
+        {zoomedImage && (
+          <div
+            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4"
+            onClick={() => setZoomedImage(null)}
+          >
+            <div className="relative max-w-4xl max-h-[90vh] bg-slate-900 rounded-2xl overflow-hidden p-2 border border-slate-700 shadow-2xl flex flex-col items-center">
+              <button
+                type="button"
+                onClick={() => setZoomedImage(null)}
+                className="absolute top-3 right-3 text-white/80 hover:text-white bg-slate-800/80 hover:bg-slate-800 p-2 rounded-full backdrop-blur-xs transition z-10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <img
+                src={zoomedImage}
+                alt="Gambar Soal Diperbesar"
+                className="max-h-[82vh] max-w-full object-contain rounded-lg"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          </div>
+        )}
+
       </div>
     );
   }
@@ -1020,10 +1069,21 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
                         ) : (
                           <XCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                         )}
-                        <div className="space-y-1">
+                        <div className="space-y-1.5 flex-1">
                           <p className="text-sm font-semibold text-slate-900">
                             {idx + 1}. {res.questionTitle}
                           </p>
+
+                          {res.imageUrl && (
+                            <div className="pt-1">
+                              <img
+                                src={res.imageUrl}
+                                alt="Gambar Soal"
+                                className="max-h-40 rounded-lg border border-slate-200 object-contain bg-white p-1 cursor-zoom-in"
+                                onClick={() => setZoomedImage(res.imageUrl || null)}
+                              />
+                            </div>
+                          )}
 
                           <div className="text-xs space-y-1 pt-1">
                             <div className="flex items-baseline gap-1.5">
@@ -1061,6 +1121,31 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
           )}
 
         </div>
+
+        {/* Lightbox Zoom Modal in Result Phase */}
+        {zoomedImage && (
+          <div
+            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4"
+            onClick={() => setZoomedImage(null)}
+          >
+            <div className="relative max-w-4xl max-h-[90vh] bg-slate-900 rounded-2xl overflow-hidden p-2 border border-slate-700 shadow-2xl flex flex-col items-center">
+              <button
+                type="button"
+                onClick={() => setZoomedImage(null)}
+                className="absolute top-3 right-3 text-white/80 hover:text-white bg-slate-800/80 hover:bg-slate-800 p-2 rounded-full backdrop-blur-xs transition z-10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <img
+                src={zoomedImage}
+                alt="Gambar Soal Diperbesar"
+                className="max-h-[82vh] max-w-full object-contain rounded-lg"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          </div>
+        )}
+
       </div>
     );
   }

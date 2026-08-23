@@ -479,10 +479,20 @@ export const QuizAnalyze: React.FC = () => {
                         ) : (
                           <XCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                         )}
-                        <div>
+                        <div className="space-y-1.5 flex-1">
                           <p className="text-sm font-semibold text-slate-900">
                             {i + 1}. {res.questionTitle}
                           </p>
+
+                          {res.imageUrl && (
+                            <div className="pt-1">
+                              <img
+                                src={res.imageUrl}
+                                alt="Gambar Soal"
+                                className="max-h-36 rounded-lg border border-slate-200 object-contain bg-white p-1"
+                              />
+                            </div>
+                          )}
                           
                           <div className="mt-2 space-y-1 text-xs">
                             <div className="flex items-center gap-1.5">
