@@ -75,8 +75,10 @@ interface QuizContextType {
 }
 
 const STORAGE_KEY_QUIZZES = 'flexitest_quizzes_v1';
-const STORAGE_KEY_SUBMISSIONS = 'flexitest_submissions_v1';
+const STORAGE_KEY_SUBMISSIONS = 'flexitest_submissions_real_v2';
 const STORAGE_KEY_AUTH = 'flexitest_auth_user_v1';
+
+const DUMMY_SUBMISSION_IDS = new Set(['sub-1', 'sub-2', 'sub-3', 'sub-4', 'sub-5', 'sub-6']);
 
 const QuizContext = createContext<QuizContextType | undefined>(undefined);
 
@@ -109,7 +111,10 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed: QuizSubmission[] = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((s) => !DUMMY_SUBMISSION_IDS.has(s.id));
+        }
       }
     } catch (e) {
       console.error('Failed to load submissions from storage', e);
