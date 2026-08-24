@@ -87,7 +87,13 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
         if (docSnap.exists()) {
           const data = docSnap.data() as Quiz;
           if (data && data.id) {
-            setCloudQuiz(data);
+            if (data.id === DEFAULT_DATABASE_QUIZ.id && (!data.questions[10]?.title?.includes('Aturan pada DBMS') || data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length)) {
+              const updated = { ...DEFAULT_DATABASE_QUIZ, ...data, questions: DEFAULT_DATABASE_QUIZ.questions };
+              setCloudQuiz(updated);
+              persistQuizToCloud(updated);
+            } else {
+              setCloudQuiz(data);
+            }
             setIsLoadingQuiz(false);
           }
         } else {

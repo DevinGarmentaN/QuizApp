@@ -146,10 +146,15 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (saved) {
         const parsed = JSON.parse(saved) as Quiz[];
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Upgrade quizzes if they have fewer questions than default
+          // Upgrade quizzes if they have fewer questions than default or outdated question set
           let updated = parsed.map((q) => {
-            if (q.id === DEFAULT_DATABASE_QUIZ.id && q.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
-              return { ...DEFAULT_DATABASE_QUIZ, ...q, questions: DEFAULT_DATABASE_QUIZ.questions };
+            if (q.id === DEFAULT_DATABASE_QUIZ.id) {
+              const isOldQuestionSet = !q.questions[10]?.title?.includes('Aturan pada DBMS');
+              if (q.questions.length < DEFAULT_DATABASE_QUIZ.questions.length || isOldQuestionSet) {
+                const refreshed = { ...DEFAULT_DATABASE_QUIZ, ...q, questions: DEFAULT_DATABASE_QUIZ.questions };
+                persistQuizToCloud(refreshed);
+                return refreshed;
+              }
             }
             if (q.id === DEFAULT_DA_QUIZ.id && q.questions.length < DEFAULT_DA_QUIZ.questions.length) {
               return { ...DEFAULT_DA_QUIZ, ...q, questions: DEFAULT_DA_QUIZ.questions };
@@ -316,11 +321,21 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           });
 
-          // Ensure DEFAULT_DATABASE_QUIZ exists if not present in collection
+          // Ensure DEFAULT_DATABASE_QUIZ exists and has latest question set
           const dbQuizIdx = cloudQuizzes.findIndex((q) => q.id === DEFAULT_DATABASE_QUIZ.id);
           if (dbQuizIdx === -1) {
             cloudQuizzes.unshift(DEFAULT_DATABASE_QUIZ);
             persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
+          } else {
+            const isOld = !cloudQuizzes[dbQuizIdx].questions[10]?.title?.includes('Aturan pada DBMS');
+            if (isOld || cloudQuizzes[dbQuizIdx].questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
+              cloudQuizzes[dbQuizIdx] = {
+                ...DEFAULT_DATABASE_QUIZ,
+                ...cloudQuizzes[dbQuizIdx],
+                questions: DEFAULT_DATABASE_QUIZ.questions,
+              };
+              persistQuizToCloud(cloudQuizzes[dbQuizIdx]);
+            }
           }
 
           // Ensure DEFAULT_DA_QUIZ exists if not present in collection
