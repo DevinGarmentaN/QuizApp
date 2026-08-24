@@ -2,8 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuiz } from '../../context/QuizContext';
 import { Quiz, Question, QuizSubmission, QuestionResult, RespondentInfo } from '../../types/quiz';
 import { QuizLeaderboard } from './QuizLeaderboard';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
 import confetti from 'canvas-confetti';
 import { 
   Clock, 
@@ -24,8 +22,7 @@ import {
   Send,
   Trophy,
   FileText,
-  Users,
-  Loader2
+  Users
 } from 'lucide-react';
 
 interface QuizPlayerProps {
@@ -36,51 +33,7 @@ interface QuizPlayerProps {
 export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
   const { quizzes, submissions, submitQuizResult, currentUser } = useQuiz();
 
-  // Real-time lookup for the specific quiz from context and Firestore
-  const [liveQuiz, setLiveQuiz] = useState<Quiz | null>(() => {
-    return quizzes.find((q) => q.id === quizId || q.slug === quizId) || null;
-  });
-  const [isLoadingQuiz, setIsLoadingQuiz] = useState<boolean>(!liveQuiz);
-
-  useEffect(() => {
-    // Look in current quizzes array first
-    const found = quizzes.find((q) => q.id === quizId || q.slug === quizId);
-    if (found) {
-      setLiveQuiz(found);
-      setIsLoadingQuiz(false);
-    }
-
-    // Subscribe to Firestore for real-time updates to this specific quiz document
-    if (quizId) {
-      const quizDocRef = doc(db, 'quizzes', quizId);
-      const unsubscribe = onSnapshot(
-        quizDocRef,
-        (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data() as Quiz;
-            if (data && data.id) {
-              setLiveQuiz(data);
-              setIsLoadingQuiz(false);
-            }
-          } else if (!found) {
-            const fallback = quizzes.find((q) => q.id === quizId || q.slug === quizId);
-            if (fallback) {
-              setLiveQuiz(fallback);
-            }
-            setIsLoadingQuiz(false);
-          }
-        },
-        (err) => {
-          console.warn('Live quiz doc sync warning:', err);
-          setIsLoadingQuiz(false);
-        }
-      );
-
-      return () => unsubscribe();
-    }
-  }, [quizId, quizzes]);
-
-  const quiz = liveQuiz || quizzes.find((q) => q.id === quizId || q.slug === quizId) || quizzes[0];
+  const quiz = useMemo(() => quizzes.find((q) => q.id === quizId) || quizzes[0], [quizzes, quizId]);
 
   // Phase: 'register' | 'taking' | 'result'
   const [phase, setPhase] = useState<'register' | 'taking' | 'result'>('register');
@@ -107,13 +60,13 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
 
   // Shuffled questions and options prepared on start
   const preparedQuestions = useMemo(() => {
-    if (!quiz || !quiz.questions) return [];
+    if (!quiz) return [];
     let qList = [...quiz.questions];
-    if (quiz.settings?.shuffleQuestions) {
-      qList = [...qList].sort(() => Math.random() - 0.5);
+    if (quiz.settings.shuffleQuestions) {
+      qList = qList.sort(() => Math.random() - 0.5);
     }
     return qList.map((q) => {
-      if ((q.type === 'single_choice' || q.type === 'multiple_choice') && (q.shuffleOptions || quiz.settings?.shuffleOptions)) {
+      if ((q.type === 'single_choice' || q.type === 'multiple_choice') && (q.shuffleOptions || quiz.settings.shuffleOptions)) {
         return {
           ...q,
           options: [...q.options].sort(() => Math.random() - 0.5),
@@ -121,11 +74,11 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
       }
       return q;
     });
-  }, [quiz]);
+  }, [quiz, phase]);
 
   // Timer countdown
   useEffect(() => {
-    if (phase !== 'taking' || !quiz?.settings?.timeLimitMinutes || quiz.settings.timeLimitMinutes <= 0) {
+    if (phase !== 'taking' || !quiz.settings.timeLimitMinutes || quiz.settings.timeLimitMinutes <= 0) {
       return;
     }
 
@@ -301,19 +254,6 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
     const secs = totalSecs % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
-
-  // Loading Quiz from Cloud
-  if (isLoadingQuiz && !liveQuiz) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
-        <div className="bg-slate-800/80 p-8 rounded-3xl border border-slate-700 shadow-2xl flex flex-col items-center max-w-sm w-full text-center">
-          <Loader2 className="w-10 h-10 text-indigo-400 animate-spin mb-4" />
-          <h3 className="text-base font-bold text-slate-100">Memuat Data Ujian...</h3>
-          <p className="text-xs text-slate-400 mt-1">Mengambil butir soal dan konfigurasi terbaru dari server.</p>
-        </div>
-      </div>
-    );
-  }
 
   // 1. REGISTRATION PHASE
   if (phase === 'register') {

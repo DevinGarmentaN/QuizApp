@@ -9,7 +9,7 @@ interface AiQuizGeneratorModalProps {
 }
 
 export const AiQuizGeneratorModal: React.FC<AiQuizGeneratorModalProps> = ({ isOpen, onClose }) => {
-  const { activeQuiz, addMultipleQuestions } = useQuiz();
+  const { activeQuiz, addQuestion, updateQuestion } = useQuiz();
   const [topic, setTopic] = useState('');
   const [numQuestions, setNumQuestions] = useState(5);
   const [difficulty, setDifficulty] = useState<'Mudah' | 'Sedang' | 'Sulit'>('Sedang');
@@ -43,13 +43,11 @@ export const AiQuizGeneratorModal: React.FC<AiQuizGeneratorModalProps> = ({ isOp
       // We'll generate realistic questions tailored to the requested topic
       const generatedQuestions = generateCuratedQuestions(promptTopic, numQuestions, firstPageId, difficulty);
 
-      // Add questions to quiz in one atomic update
-      const questionsWithIds: Question[] = generatedQuestions.map((q, idx) => ({
-        ...q,
-        id: 'q-ai-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).slice(2, 5),
-        pageId: firstPageId,
-      }));
-      addMultipleQuestions(activeQuiz.id, questionsWithIds);
+      // Add questions to quiz
+      generatedQuestions.forEach((q) => {
+        const qId = addQuestion(activeQuiz.id, firstPageId, q.type);
+        updateQuestion(activeQuiz.id, qId, q);
+      });
 
       setStatusMessage('Selesai! Butir soal berhasil ditambahkan ke kuis.');
       setTimeout(() => {

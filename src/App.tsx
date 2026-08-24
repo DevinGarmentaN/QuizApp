@@ -30,34 +30,24 @@ const MainAppContent: React.FC = () => {
   const [isNewQuizModalOpen, setIsNewQuizModalOpen] = useState(false);
   const [isPrintViewOpen, setIsPrintViewOpen] = useState(false);
 
-  // Check URL hash and query params for direct shared link e.g. /#quiz=quiz-id or /?quiz=quiz-id
+  // Check URL hash for direct shared link e.g. /#quiz=quiz-id
   useEffect(() => {
-    const handleUrlQuizCheck = () => {
+    const handleHashChange = () => {
       const hash = window.location.hash;
-      const urlParams = new URLSearchParams(window.location.search);
-      const queryQuizId = urlParams.get('quiz') || urlParams.get('id');
-
-      let targetId: string | null = null;
       if (hash.startsWith('#quiz=')) {
-        targetId = hash.replace('#quiz=', '');
-      } else if (queryQuizId) {
-        targetId = queryQuizId;
-      }
-
-      if (targetId) {
-        setTakingQuizId(targetId);
-        setAppMode('taker');
+        const targetId = hash.replace('#quiz=', '');
+        const targetQuiz = quizzes.find((q) => q.id === targetId);
+        if (targetQuiz) {
+          setTakingQuizId(targetId);
+          setAppMode('taker');
+        }
       }
     };
 
-    handleUrlQuizCheck();
-    window.addEventListener('hashchange', handleUrlQuizCheck);
-    window.addEventListener('popstate', handleUrlQuizCheck);
-    return () => {
-      window.removeEventListener('hashchange', handleUrlQuizCheck);
-      window.removeEventListener('popstate', handleUrlQuizCheck);
-    };
-  }, [setTakingQuizId, setAppMode]);
+    handleHashChange();
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [quizzes, setTakingQuizId, setAppMode]);
 
   // If in Student / Live Test Taking Mode
   if (appMode === 'taker' && takingQuizId) {
@@ -67,12 +57,7 @@ const MainAppContent: React.FC = () => {
         onExit={() => {
           setAppMode('admin');
           setTakingQuizId(null);
-          if (window.location.hash.startsWith('#quiz=')) {
-            window.location.hash = '';
-          }
-          if (window.location.search.includes('quiz=') || window.location.search.includes('id=')) {
-            window.history.replaceState({}, document.title, window.location.pathname);
-          }
+          window.location.hash = '';
         }}
       />
     );

@@ -81,9 +81,10 @@ export const QuizBuilder: React.FC<QuizBuilderProps> = ({ onOpenAiModal }) => {
       // Edit existing
       updateQuestion(activeQuiz.id, editingQuestion.id, questionData);
     } else {
-      // Add new directly with full data
+      // Add new
       const targetPageId = editingQuestion?.pageId || activeQuiz.pages[0]?.id || 'page-1';
-      addQuestion(activeQuiz.id, targetPageId, questionData.type || 'single_choice', questionData);
+      const newId = addQuestion(activeQuiz.id, targetPageId, questionData.type);
+      updateQuestion(activeQuiz.id, newId, questionData);
     }
     setIsEditorModalOpen(false);
     setEditingQuestion(null);
