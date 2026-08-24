@@ -85,6 +85,7 @@ interface QuizContextType {
   
   // Reset & Imports
   resetToDefaultData: () => void;
+  clearAppCache: () => void;
   importQuizJson: (jsonString: string) => boolean;
 }
 
@@ -740,6 +741,23 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setActiveTab('create');
   };
 
+  const clearAppCache = () => {
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+      if ('caches' in window) {
+        caches.keys().then((names) => {
+          names.forEach((name) => caches.delete(name));
+        });
+      }
+    } catch (e) {
+      console.warn('Cache clearing error:', e);
+    }
+    setQuizzes([DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ]);
+    setActiveQuizId(DEFAULT_DATABASE_QUIZ.id);
+    setActiveTab('create');
+  };
+
   const importQuizJson = (jsonString: string): boolean => {
     try {
       const parsed = JSON.parse(jsonString);
@@ -801,6 +819,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         deleteSubmission,
         clearQuizSubmissions,
         resetToDefaultData,
+        clearAppCache,
         importQuizJson,
       }}
     >
