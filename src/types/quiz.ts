@@ -105,7 +105,6 @@ export interface QuestionResult {
   score: number;
   maxScore: number;
   explanation?: string;
-  imageUrl?: string;
 }
 
 export interface AuthUser {

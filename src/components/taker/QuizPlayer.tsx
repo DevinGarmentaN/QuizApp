@@ -2,9 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useQuiz } from '../../context/QuizContext';
 import { Quiz, Question, QuizSubmission, QuestionResult, RespondentInfo } from '../../types/quiz';
 import { QuizLeaderboard } from './QuizLeaderboard';
-import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
-import { db, ensureAuth } from '../../lib/firebase';
-import { DEFAULT_DATABASE_QUIZ, DEFAULT_DA_QUIZ } from '../../data/defaultQuizzes';
 import confetti from 'canvas-confetti';
 import { 
   Clock, 
@@ -25,11 +22,7 @@ import {
   Send,
   Trophy,
   FileText,
-  Users,
-  ZoomIn,
-  X,
-  Image as ImageIcon,
-  Loader2
+  Users
 } from 'lucide-react';
 
 interface QuizPlayerProps {
@@ -38,187 +31,9 @@ interface QuizPlayerProps {
 }
 
 export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
-  const { quizzes, submissions, submitQuizResult, currentUser, persistQuizToCloud } = useQuiz();
+  const { quizzes, submissions, submitQuizResult, currentUser } = useQuiz();
 
-  const [cloudQuiz, setCloudQuiz] = useState<Quiz | null>(() => {
-    // Check in memory & localStorage first to get customized settings
-    const memFound = quizzes.find((q) => q.id === quizId);
-    if (memFound) return memFound;
-    try {
-      const saved = localStorage.getItem('flexitest_quizzes_v2');
-      if (saved) {
-        const list = JSON.parse(saved) as Quiz[];
-        const localFound = list.find((q) => q.id === quizId);
-        if (localFound) return localFound;
-      }
-    } catch (e) {
-      console.warn(e);
-    }
-    if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
-      return DEFAULT_DATABASE_QUIZ;
-    }
-    if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14' || quizId.includes('1787487557515')) {
-      return DEFAULT_DA_QUIZ;
-    }
-    return null;
-  });
-
-  const [isLoadingQuiz, setIsLoadingQuiz] = useState<boolean>(!cloudQuiz);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
-
-  // Directly subscribe to this specific quiz in Cloud Firestore for real-time fresh updates
-  useEffect(() => {
-    let isMounted = true;
-    if (!cloudQuiz) {
-      setIsLoadingQuiz(true);
-    }
-    setLoadError(null);
-
-    ensureAuth();
-
-    const quizDocRef = doc(db, 'quizzes', quizId);
-
-    // Real-time listener for the specific quiz
-    const unsubscribe = onSnapshot(
-      quizDocRef,
-      (docSnap) => {
-        if (!isMounted) return;
-        if (docSnap.exists()) {
-          const data = docSnap.data() as Quiz;
-          if (data && data.id) {
-            if (data.id === DEFAULT_DATABASE_QUIZ.id && (!data.questions[10]?.title?.includes('Aturan pada DBMS') || data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length)) {
-              const updated = { ...DEFAULT_DATABASE_QUIZ, ...data, questions: DEFAULT_DATABASE_QUIZ.questions };
-              setCloudQuiz(updated);
-              persistQuizToCloud(updated);
-            } else {
-              setCloudQuiz(data);
-            }
-            setIsLoadingQuiz(false);
-          }
-        } else {
-          // If not found in cloud, check memory, storage, then default fallback
-          const localFallback = quizzes.find((q) => q.id === quizId);
-          if (localFallback) {
-            setCloudQuiz(localFallback);
-            persistQuizToCloud(localFallback);
-            setIsLoadingQuiz(false);
-          } else if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
-            setCloudQuiz(DEFAULT_DATABASE_QUIZ);
-            persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
-            setIsLoadingQuiz(false);
-          } else if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14' || quizId.includes('1787487557515')) {
-            setCloudQuiz(DEFAULT_DA_QUIZ);
-            persistQuizToCloud(DEFAULT_DA_QUIZ);
-            setIsLoadingQuiz(false);
-          } else {
-            try {
-              const saved = localStorage.getItem('flexitest_quizzes_v2');
-              if (saved) {
-                const list = JSON.parse(saved) as Quiz[];
-                const storageFallback = list.find((q) => q.id === quizId);
-                if (storageFallback) {
-                  setCloudQuiz(storageFallback);
-                  persistQuizToCloud(storageFallback);
-                  setIsLoadingQuiz(false);
-                  return;
-                }
-              }
-            } catch (e) {
-              console.warn(e);
-            }
-            setLoadError('Kuis dengan kode ini belum tersedia di cloud database.');
-            setIsLoadingQuiz(false);
-          }
-        }
-      },
-      (error) => {
-        console.warn('Real-time quiz fetch warning:', error?.message || error);
-        if (!isMounted) return;
-        const localFallback = quizzes.find((q) => q.id === quizId);
-        if (localFallback) {
-          setCloudQuiz(localFallback);
-          setIsLoadingQuiz(false);
-          return;
-        }
-        if (quizId === DEFAULT_DATABASE_QUIZ.id || quizId === 'quiz-db-14') {
-          setCloudQuiz(DEFAULT_DATABASE_QUIZ);
-          setIsLoadingQuiz(false);
-          return;
-        }
-        if (quizId === DEFAULT_DA_QUIZ.id || quizId === 'quiz-da-14' || quizId.includes('1787487557515')) {
-          setCloudQuiz(DEFAULT_DA_QUIZ);
-          setIsLoadingQuiz(false);
-          return;
-        }
-
-        const isQuota =
-          error?.code === 'resource-exhausted' ||
-          error?.message?.toLowerCase().includes('quota') ||
-          error?.toString()?.toLowerCase().includes('quota');
-
-        if (isQuota) {
-          // In quota exceeded, check local storage directly
-          try {
-            const saved = localStorage.getItem('flexitest_quizzes_v2');
-            if (saved) {
-              const list = JSON.parse(saved) as Quiz[];
-              const storageFallback = list.find((q) => q.id === quizId);
-              if (storageFallback) {
-                setCloudQuiz(storageFallback);
-                setIsLoadingQuiz(false);
-                return;
-              }
-            }
-          } catch (e) {
-            console.warn(e);
-          }
-          setIsLoadingQuiz(false);
-          return;
-        }
-
-        // Try fallback getDoc for non-quota errors
-        getDoc(quizDocRef)
-          .then((snap) => {
-            if (snap.exists()) {
-              const data = snap.data() as Quiz;
-              setCloudQuiz(data);
-            } else {
-              const localMem = quizzes.find((q) => q.id === quizId);
-              if (localMem) {
-                setCloudQuiz(localMem);
-                persistQuizToCloud(localMem);
-              } else {
-                setLoadError('Gagal memuat kuis dari server cloud.');
-              }
-            }
-          })
-          .catch(() => {
-            const localMem = quizzes.find((q) => q.id === quizId);
-            if (localMem) {
-              setCloudQuiz(localMem);
-              persistQuizToCloud(localMem);
-            } else {
-              setLoadError('Koneksi terputus atau kuis tidak ditemukan.');
-            }
-          })
-          .finally(() => {
-            if (isMounted) setIsLoadingQuiz(false);
-          });
-      }
-    );
-
-    return () => {
-      isMounted = false;
-      unsubscribe();
-    };
-  }, [quizId, retryCount]);
-
-  // Use the cloud quiz as the ultimate source of truth, or context match as fallback
-  const quiz = useMemo(() => {
-    if (cloudQuiz && cloudQuiz.id === quizId) return cloudQuiz;
-    return quizzes.find((q) => q.id === quizId) || null;
-  }, [cloudQuiz, quizzes, quizId]);
+  const quiz = useMemo(() => quizzes.find((q) => q.id === quizId) || quizzes[0], [quizzes, quizId]);
 
   // Phase: 'register' | 'taking' | 'result'
   const [phase, setPhase] = useState<'register' | 'taking' | 'result'>('register');
@@ -242,7 +57,6 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
   const [timeRemainingSeconds, setTimeRemainingSeconds] = useState<number>(0);
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [completedSubmission, setCompletedSubmission] = useState<QuizSubmission | null>(null);
-  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   // Shuffled questions and options prepared on start
   const preparedQuestions = useMemo(() => {
@@ -264,7 +78,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
 
   // Timer countdown
   useEffect(() => {
-    if (!quiz || phase !== 'taking' || !quiz.settings.timeLimitMinutes || quiz.settings.timeLimitMinutes <= 0) {
+    if (phase !== 'taking' || !quiz.settings.timeLimitMinutes || quiz.settings.timeLimitMinutes <= 0) {
       return;
     }
 
@@ -284,7 +98,6 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
 
   const handleStartTest = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quiz) return;
 
     if (quiz.settings.requireRegistration.name && !respondent.name.trim()) {
       alert('Mohon masukkan nama lengkap Anda.');
@@ -321,7 +134,6 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
   };
 
   const handleFinalSubmit = (forced = false) => {
-    if (!quiz) return;
     if (!forced && !confirm('Apakah Anda yakin ingin mengumpulkan lembar ujian ini sekarang?')) {
       return;
     }
@@ -403,7 +215,6 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
         score: earnedScore,
         maxScore: qPoints,
         explanation: q.explanation,
-        imageUrl: q.imageUrl,
       });
     });
 
@@ -443,93 +254,6 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
     const secs = totalSecs % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
-
-  // Loading State
-  if (isLoadingQuiz && !quiz) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
-        <div className="bg-slate-800/90 border border-slate-700 p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-sm w-full text-center space-y-4 animate-in fade-in">
-          <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
-          <div>
-            <h3 className="font-bold text-base text-slate-100">Memuat Lembar Ujian...</h3>
-            <p className="text-xs text-slate-400 mt-1">Mengambil butir soal terbaru dari Cloud Server.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Not Found State
-  if (!quiz) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
-        <div className="bg-slate-800/90 border border-slate-700 p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-lg w-full text-center space-y-5 animate-in fade-in">
-          <div className="w-14 h-14 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
-            <AlertCircle className="w-8 h-8" />
-          </div>
-
-          <div>
-            <h3 className="font-bold text-lg text-slate-100">Kuis Tidak Ditemukan</h3>
-            <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-              {loadError || `Kuis dengan kode "${quizId}" belum tersedia di database atau link ujian yang Anda buka tidak valid.`}
-            </p>
-            <p className="text-[11px] text-slate-400 mt-2">
-              Silakan pastikan dosen pengajar telah mempublikasikan kuis atau periksa kembali link yang dibagikan.
-            </p>
-          </div>
-
-          {/* Quick links to available default quizzes */}
-          <div className="w-full bg-slate-900/70 border border-slate-700/80 rounded-xl p-3 text-left space-y-2">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Kuis Ujian yang Tersedia:
-            </div>
-            <div className="space-y-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  window.location.hash = `#quiz=${DEFAULT_DA_QUIZ.id}`;
-                  window.location.reload();
-                }}
-                className="w-full text-left px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition flex items-center justify-between cursor-pointer"
-              >
-                <span className="truncate">QUIZ DA Pertemuan 14 - Desain & Analisis Algoritma (25 Soal)</span>
-                <span className="text-[10px] text-indigo-400 ml-2 shrink-0">Buka ➔</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  window.location.hash = `#quiz=${DEFAULT_DATABASE_QUIZ.id}`;
-                  window.location.reload();
-                }}
-                className="w-full text-left px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-semibold text-slate-200 transition flex items-center justify-between cursor-pointer"
-              >
-                <span className="truncate">QUIZ Pertemuan 14 - Basis Data & SQL (25 Soal)</span>
-                <span className="text-[10px] text-indigo-400 ml-2 shrink-0">Buka ➔</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-center space-x-3 w-full pt-1">
-            <button
-              onClick={() => {
-                setIsLoadingQuiz(true);
-                setRetryCount((prev) => prev + 1);
-              }}
-              className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl text-xs font-bold transition cursor-pointer"
-            >
-              Coba Muat Ulang
-            </button>
-            <button
-              onClick={onExit}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
-            >
-              Kembali ke Dashboard
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   // 1. REGISTRATION PHASE
   if (phase === 'register') {
@@ -780,8 +504,8 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
                 </button>
               </div>
 
-              {/* Question Title & Media */}
-              <div className="space-y-3">
+              {/* Question Title */}
+              <div className="space-y-2">
                 <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-relaxed">
                   {currentQ.title}
                 </h3>
@@ -789,26 +513,6 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
                   <p className="text-xs text-slate-500 italic">
                     {currentQ.description}
                   </p>
-                )}
-
-                {/* Question Image Attachment */}
-                {currentQ.imageUrl && (
-                  <div className="relative group/img rounded-xl overflow-hidden border border-slate-200 bg-slate-50 p-2 inline-block max-w-full">
-                    <img
-                      src={currentQ.imageUrl}
-                      alt="Gambar Soal"
-                      className="max-h-72 sm:max-h-80 w-auto rounded-lg object-contain cursor-zoom-in"
-                      onClick={() => setZoomedImage(currentQ.imageUrl || null)}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setZoomedImage(currentQ.imageUrl || null)}
-                      className="absolute bottom-4 right-4 bg-slate-900/80 hover:bg-slate-900 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-md flex items-center gap-1.5 backdrop-blur-xs transition"
-                    >
-                      <ZoomIn className="w-3.5 h-3.5" />
-                      <span>Perbesar Gambar</span>
-                    </button>
-                  </div>
                 )}
               </div>
 
@@ -1129,30 +833,6 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
           </div>
         )}
 
-        {/* Lightbox Zoom Modal */}
-        {zoomedImage && (
-          <div
-            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4"
-            onClick={() => setZoomedImage(null)}
-          >
-            <div className="relative max-w-4xl max-h-[90vh] bg-slate-900 rounded-2xl overflow-hidden p-2 border border-slate-700 shadow-2xl flex flex-col items-center">
-              <button
-                type="button"
-                onClick={() => setZoomedImage(null)}
-                className="absolute top-3 right-3 text-white/80 hover:text-white bg-slate-800/80 hover:bg-slate-800 p-2 rounded-full backdrop-blur-xs transition z-10"
-              >
-                <X className="w-5 h-5" />
-              </button>
-              <img
-                src={zoomedImage}
-                alt="Gambar Soal Diperbesar"
-                className="max-h-[82vh] max-w-full object-contain rounded-lg"
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          </div>
-        )}
-
       </div>
     );
   }
@@ -1340,21 +1020,10 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
                         ) : (
                           <XCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                         )}
-                        <div className="space-y-1.5 flex-1">
+                        <div className="space-y-1">
                           <p className="text-sm font-semibold text-slate-900">
                             {idx + 1}. {res.questionTitle}
                           </p>
-
-                          {res.imageUrl && (
-                            <div className="pt-1">
-                              <img
-                                src={res.imageUrl}
-                                alt="Gambar Soal"
-                                className="max-h-40 rounded-lg border border-slate-200 object-contain bg-white p-1 cursor-zoom-in"
-                                onClick={() => setZoomedImage(res.imageUrl || null)}
-                              />
-                            </div>
-                          )}
 
                           <div className="text-xs space-y-1 pt-1">
                             <div className="flex items-baseline gap-1.5">
@@ -1392,31 +1061,6 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
           )}
 
         </div>
-
-        {/* Lightbox Zoom Modal in Result Phase */}
-        {zoomedImage && (
-          <div
-            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4"
-            onClick={() => setZoomedImage(null)}
-          >
-            <div className="relative max-w-4xl max-h-[90vh] bg-slate-900 rounded-2xl overflow-hidden p-2 border border-slate-700 shadow-2xl flex flex-col items-center">
-              <button
-                type="button"
-                onClick={() => setZoomedImage(null)}
-                className="absolute top-3 right-3 text-white/80 hover:text-white bg-slate-800/80 hover:bg-slate-800 p-2 rounded-full backdrop-blur-xs transition z-10"
-              >
-                <X className="w-5 h-5" />
-              </button>
-              <img
-                src={zoomedImage}
-                alt="Gambar Soal Diperbesar"
-                className="max-h-[82vh] max-w-full object-contain rounded-lg"
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          </div>
-        )}
-
       </div>
     );
   }

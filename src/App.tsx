@@ -30,36 +30,24 @@ const MainAppContent: React.FC = () => {
   const [isNewQuizModalOpen, setIsNewQuizModalOpen] = useState(false);
   const [isPrintViewOpen, setIsPrintViewOpen] = useState(false);
 
-  // Check URL hash / query for direct shared link e.g. /#quiz=quiz-id or ?quiz=quiz-id
+  // Check URL hash for direct shared link e.g. /#quiz=quiz-id
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash || '';
-      const search = window.location.search || '';
-      
-      let targetId: string | null = null;
+      const hash = window.location.hash;
       if (hash.startsWith('#quiz=')) {
-        targetId = decodeURIComponent(hash.replace('#quiz=', '').split('&')[0]);
-      } else if (hash.startsWith('#/quiz/')) {
-        targetId = decodeURIComponent(hash.replace('#/quiz/', '').split('&')[0]);
-      } else if (search.includes('quiz=')) {
-        const params = new URLSearchParams(search);
-        targetId = params.get('quiz');
-      }
-
-      if (targetId) {
-        setTakingQuizId(targetId);
-        setAppMode('taker');
+        const targetId = hash.replace('#quiz=', '');
+        const targetQuiz = quizzes.find((q) => q.id === targetId);
+        if (targetQuiz) {
+          setTakingQuizId(targetId);
+          setAppMode('taker');
+        }
       }
     };
 
     handleHashChange();
     window.addEventListener('hashchange', handleHashChange);
-    window.addEventListener('popstate', handleHashChange);
-    return () => {
-      window.removeEventListener('hashchange', handleHashChange);
-      window.removeEventListener('popstate', handleHashChange);
-    };
-  }, [setTakingQuizId, setAppMode]);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [quizzes, setTakingQuizId, setAppMode]);
 
   // If in Student / Live Test Taking Mode
   if (appMode === 'taker' && takingQuizId) {

@@ -23,8 +23,7 @@ import {
   Sparkles,
   Layers,
   Settings,
-  Info,
-  Image as ImageIcon
+  Info
 } from 'lucide-react';
 
 interface QuizBuilderProps {
@@ -259,31 +258,14 @@ export const QuizBuilder: React.FC<QuizBuilderProps> = ({ onOpenAiModal }) => {
                             <span className="font-black text-slate-900 text-sm leading-6 select-none shrink-0 font-mono">
                               {globalIdx}.
                             </span>
-                            <div className="space-y-1.5 flex-1">
-                              <div className="flex items-center gap-2">
-                                <h3 className="text-sm font-semibold text-slate-900 leading-relaxed">
-                                  {question.title}
-                                </h3>
-                                {question.imageUrl && (
-                                  <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
-                                    <ImageIcon className="w-3 h-3" />
-                                    Gambar
-                                  </span>
-                                )}
-                              </div>
+                            <div className="space-y-1 flex-1">
+                              <h3 className="text-sm font-semibold text-slate-900 leading-relaxed">
+                                {question.title}
+                              </h3>
                               {question.description && (
                                 <p className="text-xs text-slate-500 italic">
                                   {question.description}
                                 </p>
-                              )}
-                              {question.imageUrl && (
-                                <div className="pt-1">
-                                  <img
-                                    src={question.imageUrl}
-                                    alt="Lampiran Soal"
-                                    className="max-h-48 rounded-lg border border-slate-200 object-contain bg-slate-50 p-1 shadow-2xs"
-                                  />
-                                </div>
                               )}
                             </div>
                           </div>

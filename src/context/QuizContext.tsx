@@ -7,13 +7,12 @@ import {
   onSnapshot,
   query,
   orderBy,
-  limit,
   getDocs,
   writeBatch
 } from 'firebase/firestore';
 import { db, ensureAuth } from '../lib/firebase';
 import { Quiz, Question, QuizPage, QuizSettings, QuizSubmission, QuestionType, OptionItem, AuthUser } from '../types/quiz';
-import { DEFAULT_DATABASE_QUIZ, DEFAULT_DA_QUIZ, SAMPLE_MULTI_TYPE_QUIZ } from '../data/defaultQuizzes';
+import { DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ } from '../data/defaultQuizzes';
 
 export const PRIMARY_INSTRUCTOR: AuthUser & { password: string } = {
   id: 'user-dosen-devin',
@@ -59,13 +58,11 @@ interface QuizContextType {
   setAppMode: (mode: 'admin' | 'taker') => void;
   setTakingQuizId: (id: string | null) => void;
   
-  // Quiz CRUD & Cloud Sync
+  // Quiz CRUD
   createQuiz: (title?: string, description?: string) => string;
   updateQuizSettings: (quizId: string, settings: Partial<QuizSettings>) => void;
   deleteQuiz: (quizId: string) => void;
   duplicateQuiz: (quizId: string) => string;
-  persistQuizToCloud: (quizToSave: Quiz) => Promise<boolean>;
-  syncQuizToCloud: (quizId: string) => Promise<boolean>;
   
   // Page operations
   addPage: (quizId: string, title?: string) => void;
@@ -85,7 +82,6 @@ interface QuizContextType {
   submitQuizResult: (submission: QuizSubmission) => Promise<void>;
   deleteSubmission: (submissionId: string) => Promise<void>;
   clearQuizSubmissions: (quizId: string) => Promise<void>;
-  refreshSubmissions: () => Promise<number>;
   
   // Reset & Imports
   resetToDefaultData: () => void;
@@ -93,29 +89,8 @@ interface QuizContextType {
 }
 
 const STORAGE_KEY_QUIZZES = 'flexitest_quizzes_v2';
-const STORAGE_KEY_SUBMISSIONS = 'flexitest_submissions_v2';
 const STORAGE_KEY_AUTH = 'flexitest_auth_user_v1';
 const DUMMY_SUBMISSION_IDS = new Set(['sub-1', 'sub-2', 'sub-3', 'sub-4', 'sub-5', 'sub-6']);
-
-// Helper to extract quizId from URL hash or query params
-const getInitialQuizIdFromUrl = (): string | null => {
-  try {
-    if (typeof window === 'undefined') return null;
-    const hash = window.location.hash || '';
-    const search = window.location.search || '';
-    
-    if (hash.startsWith('#quiz=')) return decodeURIComponent(hash.replace('#quiz=', '').split('&')[0]);
-    if (hash.startsWith('#/quiz/')) return decodeURIComponent(hash.replace('#/quiz/', '').split('&')[0]);
-    if (search.includes('quiz=')) {
-      const params = new URLSearchParams(search);
-      const q = params.get('quiz');
-      if (q) return q;
-    }
-  } catch (e) {
-    console.warn('URL parsing error', e);
-  }
-  return null;
-};
 
 // Helper to sanitize data by removing undefined fields for Firebase Firestore
 const sanitizeForFirestore = <T,>(obj: T): T => {
@@ -127,8 +102,6 @@ const sanitizeForFirestore = <T,>(obj: T): T => {
 const QuizContext = createContext<QuizContextType | undefined>(undefined);
 
 export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const initialUrlQuizId = getInitialQuizIdFromUrl();
-
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_AUTH);
@@ -145,53 +118,19 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const saved = localStorage.getItem(STORAGE_KEY_QUIZZES);
       if (saved) {
-        const parsed = JSON.parse(saved) as Quiz[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Upgrade quizzes if they have fewer questions than default or outdated question set
-          let updated = parsed.map((q) => {
-            if (q.id === DEFAULT_DATABASE_QUIZ.id) {
-              const isOldQuestionSet = !q.questions[10]?.title?.includes('Aturan pada DBMS');
-              if (q.questions.length < DEFAULT_DATABASE_QUIZ.questions.length || isOldQuestionSet) {
-                const refreshed = { ...DEFAULT_DATABASE_QUIZ, ...q, questions: DEFAULT_DATABASE_QUIZ.questions };
-                persistQuizToCloud(refreshed);
-                return refreshed;
-              }
-            }
-            if (q.id === DEFAULT_DA_QUIZ.id && q.questions.length < DEFAULT_DA_QUIZ.questions.length) {
-              return { ...DEFAULT_DA_QUIZ, ...q, questions: DEFAULT_DA_QUIZ.questions };
-            }
-            return q;
-          });
-          if (!updated.some((q) => q.id === DEFAULT_DA_QUIZ.id)) {
-            updated.splice(1, 0, DEFAULT_DA_QUIZ);
-          }
-          return updated;
-        }
+        return JSON.parse(saved);
       }
     } catch (e) {
       console.error('Failed to load quizzes from storage', e);
     }
-    return [DEFAULT_DATABASE_QUIZ, DEFAULT_DA_QUIZ, SAMPLE_MULTI_TYPE_QUIZ];
+    return [DEFAULT_DATABASE_QUIZ, SAMPLE_MULTI_TYPE_QUIZ];
   });
 
-  const [submissions, setSubmissions] = useState<QuizSubmission[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
-      if (saved) {
-        const parsed = JSON.parse(saved) as QuizSubmission[];
-        if (Array.isArray(parsed)) {
-          return parsed.filter((s) => s && !DUMMY_SUBMISSION_IDS.has(s.id));
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to load local submissions cache', e);
-    }
-    return [];
-  });
+  const [submissions, setSubmissions] = useState<QuizSubmission[]>([]);
   const [activeQuizId, setActiveQuizId] = useState<string>(DEFAULT_DATABASE_QUIZ.id);
   const [activeTab, setActiveTab] = useState<'create' | 'configure' | 'publish' | 'analyze' | 'preview'>('create');
-  const [appMode, setAppMode] = useState<'admin' | 'taker'>(initialUrlQuizId ? 'taker' : 'admin');
-  const [takingQuizId, setTakingQuizId] = useState<string | null>(initialUrlQuizId);
+  const [appMode, setAppMode] = useState<'admin' | 'taker'>('admin');
+  const [takingQuizId, setTakingQuizId] = useState<string | null>(null);
   const [isCloudSynced, setIsCloudSynced] = useState<boolean>(false);
 
   // Initialize Anonymous Firebase Auth
@@ -199,37 +138,10 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ensureAuth();
   }, []);
 
-  // Listen to hash and search changes globally so student links work without auth
-  useEffect(() => {
-    const handleUrlChange = () => {
-      const targetId = getInitialQuizIdFromUrl();
-      if (targetId) {
-        setTakingQuizId(targetId);
-        setAppMode('taker');
-      }
-    };
-
-    window.addEventListener('hashchange', handleUrlChange);
-    window.addEventListener('popstate', handleUrlChange);
-    return () => {
-      window.removeEventListener('hashchange', handleUrlChange);
-      window.removeEventListener('popstate', handleUrlChange);
-    };
-  }, []);
-
-  // Save submissions to local storage whenever updated
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(submissions));
-    } catch (e) {
-      console.warn('Failed to save submissions to local cache', e);
-    }
-  }, [submissions]);
-
-  // Sync Submissions from Cloud Firestore in Real-time across all devices with limits and quota safety!
+  // Sync Submissions from Cloud Firestore in Real-time across all devices!
   useEffect(() => {
     const submissionsRef = collection(db, 'submissions');
-    const q = query(submissionsRef, orderBy('submittedAt', 'desc'), limit(100));
+    const q = query(submissionsRef, orderBy('submittedAt', 'desc'));
 
     const unsubscribe = onSnapshot(
       q,
@@ -241,96 +153,39 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
             cloudSubmissions.push(data);
           }
         });
-        
-        // Merge cloudSubmissions with local state to preserve submissions even if cloud query was limited
-        setSubmissions((prev) => {
-          const mergedMap = new Map<string, QuizSubmission>();
-          // 1. Add current local submissions
-          prev.forEach((s) => {
-            if (s && s.id && !DUMMY_SUBMISSION_IDS.has(s.id)) {
-              mergedMap.set(s.id, s);
-            }
-          });
-          // 2. Overlay / add cloud submissions
-          cloudSubmissions.forEach((s) => {
-            if (s && s.id && !DUMMY_SUBMISSION_IDS.has(s.id)) {
-              mergedMap.set(s.id, s);
-            }
-          });
-          const mergedList = Array.from(mergedMap.values()).sort(
-            (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
-          );
-          return mergedList;
-        });
+        setSubmissions(cloudSubmissions);
         setIsCloudSynced(true);
       },
       (error) => {
-        const isQuota =
-          error?.code === 'resource-exhausted' ||
-          error?.message?.toLowerCase().includes('quota') ||
-          error?.toString()?.toLowerCase().includes('quota');
-
-        if (isQuota) {
-          console.warn('Firestore submissions sync using offline/cached mode (Quota limit reached).');
-        } else {
-          console.warn('Real-time submissions sync notice:', error?.message || error);
-          // Fallback query without index ordering only if not quota-related
-          getDocs(query(submissionsRef, limit(50)))
-            .then((snap) => {
-              const fallbackList: QuizSubmission[] = [];
-              snap.forEach((d) => {
-                const data = d.data() as QuizSubmission;
-                if (data && !DUMMY_SUBMISSION_IDS.has(data.id)) {
-                  fallbackList.push(data);
-                }
-              });
-              if (fallbackList.length > 0) {
-                setSubmissions((prev) => {
-                  const map = new Map<string, QuizSubmission>();
-                  prev.forEach((s) => map.set(s.id, s));
-                  fallbackList.forEach((s) => map.set(s.id, s));
-                  return Array.from(map.values()).sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
-                });
-                setIsCloudSynced(true);
-              }
-            })
-            .catch(() => {
-              // Gracefully continue with local storage data
-            });
-        }
+        console.error('Real-time submissions sync error:', error);
+        // Fallback gracefully to read collection directly if index sorting encounters issue
+        getDocs(submissionsRef).then((snap) => {
+          const fallbackList: QuizSubmission[] = [];
+          snap.forEach((d) => {
+            const data = d.data() as QuizSubmission;
+            if (data && !DUMMY_SUBMISSION_IDS.has(data.id)) {
+              fallbackList.push(data);
+            }
+          });
+          fallbackList.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+          setSubmissions(fallbackList);
+          setIsCloudSynced(true);
+        }).catch((err) => {
+          console.warn('Fallback submissions query failed:', err);
+        });
       }
     );
 
     return () => unsubscribe();
   }, []);
 
-  // Helper to persist quiz update to Cloud Firestore safely
-  const persistQuizToCloud = async (quizToSave: Quiz): Promise<boolean> => {
-    try {
-      ensureAuth();
-      const sanitized = sanitizeForFirestore(quizToSave);
-      await setDoc(doc(db, 'quizzes', quizToSave.id), sanitized, { merge: true });
-      return true;
-    } catch (e) {
-      console.warn('Could not persist quiz to Firestore (local cache retained):', e);
-      return false;
-    }
-  };
-
-  const syncQuizToCloud = async (quizId: string): Promise<boolean> => {
-    const target = quizzes.find((q) => q.id === quizId);
-    if (!target) return false;
-    return await persistQuizToCloud(target);
-  };
-
   // Sync Quizzes from Cloud Firestore so quizzes created on one device appear everywhere
   useEffect(() => {
     const quizzesRef = collection(db, 'quizzes');
-    const q = query(quizzesRef, limit(50));
     let isInitialLoad = true;
 
     const unsubscribe = onSnapshot(
-      q,
+      quizzesRef,
       (snapshot) => {
         // If snapshot comes from a pending local write, skip replacing local state to avoid race condition
         if (snapshot.metadata.hasPendingWrites) {
@@ -338,60 +193,24 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (!snapshot.empty) {
-          let cloudQuizzes: Quiz[] = [];
+          const cloudQuizzes: Quiz[] = [];
           snapshot.forEach((docSnap) => {
             const qData = docSnap.data() as Quiz;
             if (qData && qData.id) {
               cloudQuizzes.push(qData);
             }
           });
-
-          // Ensure DEFAULT_DATABASE_QUIZ exists and has latest question set
-          const dbQuizIdx = cloudQuizzes.findIndex((q) => q.id === DEFAULT_DATABASE_QUIZ.id);
-          if (dbQuizIdx === -1) {
-            cloudQuizzes.unshift(DEFAULT_DATABASE_QUIZ);
-            persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
-          } else {
-            const isOld = !cloudQuizzes[dbQuizIdx].questions[10]?.title?.includes('Aturan pada DBMS');
-            if (isOld || cloudQuizzes[dbQuizIdx].questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
-              cloudQuizzes[dbQuizIdx] = {
-                ...DEFAULT_DATABASE_QUIZ,
-                ...cloudQuizzes[dbQuizIdx],
-                questions: DEFAULT_DATABASE_QUIZ.questions,
-              };
-              persistQuizToCloud(cloudQuizzes[dbQuizIdx]);
-            }
+          if (cloudQuizzes.length > 0) {
+            setQuizzes(cloudQuizzes);
           }
-
-          // Ensure DEFAULT_DA_QUIZ exists if not present in collection
-          const daQuizIdx = cloudQuizzes.findIndex((q) => q.id === DEFAULT_DA_QUIZ.id);
-          if (daQuizIdx === -1) {
-            cloudQuizzes.splice(1, 0, DEFAULT_DA_QUIZ);
-            persistQuizToCloud(DEFAULT_DA_QUIZ);
-          }
-
-          // Safely merge with existing local quizzes so newly created local quizzes are never wiped out
-          setQuizzes((prevLocalQuizzes) => {
-            const merged = [...cloudQuizzes];
-            prevLocalQuizzes.forEach((localQ) => {
-              const inCloudIdx = merged.findIndex((cq) => cq.id === localQ.id);
-              if (inCloudIdx === -1) {
-                // Local quiz not yet in cloud list -> keep it and upload it!
-                merged.push(localQ);
-                persistQuizToCloud(localQ);
-              }
-            });
-            return merged;
-          });
         } else if (isInitialLoad) {
           // If Firestore quizzes collection is empty, seed initial default quizzes to cloud
           const seedBatch = async () => {
             try {
-              await persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
-              await persistQuizToCloud(DEFAULT_DA_QUIZ);
-              await persistQuizToCloud(SAMPLE_MULTI_TYPE_QUIZ);
+              await setDoc(doc(db, 'quizzes', DEFAULT_DATABASE_QUIZ.id), sanitizeForFirestore(DEFAULT_DATABASE_QUIZ));
+              await setDoc(doc(db, 'quizzes', SAMPLE_MULTI_TYPE_QUIZ.id), sanitizeForFirestore(SAMPLE_MULTI_TYPE_QUIZ));
             } catch (err) {
-              console.warn('Notice seeding default quizzes to Firestore:', err);
+              console.warn('Error seeding default quizzes to Firestore:', err);
             }
           };
           seedBatch();
@@ -399,7 +218,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isInitialLoad = false;
       },
       (error) => {
-        console.warn('Quizzes sync notice (local mode active):', error?.message || error);
+        console.warn('Quizzes sync warning:', error);
       }
     );
 
@@ -414,6 +233,17 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Failed to save quizzes', e);
     }
   }, [quizzes]);
+
+  // Helper to persist quiz update to Cloud Firestore safely
+  const persistQuizToCloud = async (quizToSave: Quiz) => {
+    try {
+      await ensureAuth();
+      const sanitized = sanitizeForFirestore(quizToSave);
+      await setDoc(doc(db, 'quizzes', quizToSave.id), sanitized);
+    } catch (e) {
+      console.error('Could not persist quiz to Firestore:', e);
+    }
+  };
 
   const activeQuiz = quizzes.find((q) => q.id === activeQuizId) || quizzes[0];
 
@@ -486,8 +316,8 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateQuizSettings = (quizId: string, settingsUpdate: Partial<QuizSettings>) => {
-    setQuizzes((prev) => {
-      const next = prev.map((q) => {
+    setQuizzes((prev) =>
+      prev.map((q) => {
         if (q.id === quizId) {
           const updated: Quiz = {
             ...q,
@@ -498,14 +328,8 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return updated;
         }
         return q;
-      });
-      try {
-        localStorage.setItem(STORAGE_KEY_QUIZZES, JSON.stringify(next));
-      } catch (e) {
-        console.warn(e);
-      }
-      return next;
-    });
+      })
+    );
   };
 
   const deleteQuiz = async (quizId: string) => {
@@ -792,23 +616,8 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Submit Result directly to Firebase Cloud Firestore for instant cross-device synchronization
   const submitQuizResult = async (submission: QuizSubmission) => {
-    // 1. Optimistic local state and localStorage update
-    setSubmissions((prev) => {
-      const mergedMap = new Map<string, QuizSubmission>();
-      mergedMap.set(submission.id, submission);
-      prev.forEach((s) => {
-        if (s && s.id !== submission.id) {
-          mergedMap.set(s.id, s);
-        }
-      });
-      const updated = Array.from(mergedMap.values());
-      try {
-        localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(updated));
-      } catch (e) {
-        console.warn('Failed saving submission to storage', e);
-      }
-      return updated;
-    });
+    // 1. Optimistic local update
+    setSubmissions((prev) => [submission, ...prev.filter((s) => s.id !== submission.id)]);
 
     // 2. Persist to Firestore
     try {
@@ -816,79 +625,9 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const sanitized = sanitizeForFirestore(submission);
       const submissionDocRef = doc(db, 'submissions', submission.id);
       await setDoc(submissionDocRef, sanitized);
-      console.log('Quiz submission persisted to Firestore successfully:', submission.id);
     } catch (err) {
-      console.warn('Could not persist quiz submission to Firebase Firestore (stored locally):', err);
+      console.error('Error submitting quiz result to Firebase Firestore:', err);
     }
-  };
-
-  const refreshSubmissions = async (): Promise<number> => {
-    let count = 0;
-    try {
-      const submissionsRef = collection(db, 'submissions');
-      const snap = await getDocs(query(submissionsRef, limit(100)));
-      const cloudList: QuizSubmission[] = [];
-      snap.forEach((d) => {
-        const data = d.data() as QuizSubmission;
-        if (data && !DUMMY_SUBMISSION_IDS.has(data.id)) {
-          cloudList.push(data);
-        }
-      });
-
-      setSubmissions((prev) => {
-        const map = new Map<string, QuizSubmission>();
-        // Keep existing local submissions
-        try {
-          const cached = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
-          if (cached) {
-            const parsed = JSON.parse(cached) as QuizSubmission[];
-            if (Array.isArray(parsed)) {
-              parsed.forEach((s) => {
-                if (s && !DUMMY_SUBMISSION_IDS.has(s.id)) map.set(s.id, s);
-              });
-            }
-          }
-        } catch (e) {
-          console.warn(e);
-        }
-
-        prev.forEach((s) => {
-          if (s && !DUMMY_SUBMISSION_IDS.has(s.id)) map.set(s.id, s);
-        });
-
-        cloudList.forEach((s) => {
-          if (s && !DUMMY_SUBMISSION_IDS.has(s.id)) map.set(s.id, s);
-        });
-
-        const merged = Array.from(map.values()).sort(
-          (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
-        );
-        count = merged.length;
-        try {
-          localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(merged));
-        } catch (e) {
-          console.warn(e);
-        }
-        return merged;
-      });
-      setIsCloudSynced(true);
-    } catch (e) {
-      console.warn('Manual refresh submissions from cloud noticed:', e);
-      // At least restore from localStorage
-      try {
-        const cached = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
-        if (cached) {
-          const parsed = JSON.parse(cached) as QuizSubmission[];
-          if (Array.isArray(parsed)) {
-            setSubmissions(parsed.filter((s) => s && !DUMMY_SUBMISSION_IDS.has(s.id)));
-            count = parsed.length;
-          }
-        }
-      } catch (err) {
-        console.warn(err);
-      }
-    }
-    return count;
   };
 
   const deleteSubmission = async (submissionId: string) => {
@@ -1048,8 +787,6 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateQuizSettings,
         deleteQuiz,
         duplicateQuiz,
-        persistQuizToCloud,
-        syncQuizToCloud,
         addPage,
         updatePage,
         deletePage,
@@ -1063,7 +800,6 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         submitQuizResult,
         deleteSubmission,
         clearQuizSubmissions,
-        refreshSubmissions,
         resetToDefaultData,
         importQuizJson,
       }}
