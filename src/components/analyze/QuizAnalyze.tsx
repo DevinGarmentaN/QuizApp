@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuiz } from '../../context/QuizContext';
 import { QuizSubmission } from '../../types/quiz';
 import { 
@@ -14,24 +14,47 @@ import {
   FileSpreadsheet, 
   X,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  RefreshCw
 } from 'lucide-react';
 
 export const QuizAnalyze: React.FC = () => {
-  const { activeQuiz, submissions, deleteSubmission, clearQuizSubmissions } = useQuiz();
+  const { activeQuiz, submissions, deleteSubmission, clearQuizSubmissions, refreshSubmissions, isCloudSynced } = useQuiz();
   const [selectedSubmission, setSelectedSubmission] = useState<QuizSubmission | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Custom confirmation dialog states
   const [isClearAllModalOpen, setIsClearAllModalOpen] = useState(false);
   const [submissionToDelete, setSubmissionToDelete] = useState<QuizSubmission | null>(null);
   const [notificationToast, setNotificationToast] = useState<string | null>(null);
 
+  // Auto refresh submissions when opening the Analyze tab
+  useEffect(() => {
+    refreshSubmissions().catch(() => {});
+  }, []);
+
   if (!activeQuiz) return null;
 
-  const quizSubmissions = [...submissions.filter((s) => s.quizId === activeQuiz.id)].sort((a, b) => {
+  const isMatchingQuiz = (s: QuizSubmission) => {
+    if (!s) return false;
+    if (s.quizId === activeQuiz.id) return true;
+    if (activeQuiz.id === 'quiz-db-14' && (s.quizId === 'quiz-db-14' || s.quizId === 'quiz-1' || s.quizId?.includes('db-14'))) return true;
+    if (activeQuiz.id === 'quiz-1787487557515' && (s.quizId === 'quiz-1787487557515' || s.quizId === 'quiz-2' || s.quizId?.includes('1787487557515'))) return true;
+    if (
+      s.quizTitle && 
+      activeQuiz.settings?.title && 
+      (s.quizTitle.trim().toLowerCase() === activeQuiz.settings.title.trim().toLowerCase() ||
+       (s.quizTitle.toLowerCase().includes('pertemuan 14') && activeQuiz.settings.title.toLowerCase().includes('pertemuan 14')))
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  const quizSubmissions = [...submissions.filter(isMatchingQuiz)].sort((a, b) => {
     if (b.percentage !== a.percentage) return b.percentage - a.percentage;
     if (a.durationSeconds !== b.durationSeconds) return a.durationSeconds - b.durationSeconds;
-    return new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime();
+    return new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
   });
 
   const showToast = (msg: string) => {
@@ -39,6 +62,18 @@ export const QuizAnalyze: React.FC = () => {
     setTimeout(() => {
       setNotificationToast((current) => (current === msg ? null : current));
     }, 3500);
+  };
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      const count = await refreshSubmissions();
+      showToast(`Berhasil memperbarui data. Ditemukan ${count} data pengerjaan.`);
+    } catch (e) {
+      showToast('Gagal memuat data dari server.');
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   // Statistics calculation
@@ -146,6 +181,16 @@ export const QuizAnalyze: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-2">
+          <button
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center space-x-1.5 shadow-2xs transition cursor-pointer active:scale-95 disabled:opacity-50"
+            title="Muat ulang dan sinkronkan hasil nilai mahasiswa dari Cloud Server"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-indigo-600 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>{isRefreshing ? 'Memuat...' : 'Sinkronkan Data'}</span>
+          </button>
+
           {quizSubmissions.length > 0 && (
             <button
               onClick={() => setIsClearAllModalOpen(true)}
@@ -228,12 +273,25 @@ export const QuizAnalyze: React.FC = () => {
         </div>
 
         {quizSubmissions.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">
-            <FileSpreadsheet className="w-12 h-12 mx-auto mb-2 text-slate-300" />
-            <p className="text-sm font-semibold text-slate-600">Belum ada data pengerjaan ujian</p>
-            <p className="text-xs text-slate-400 mt-1">
-              Data respon telah kosong. Bagikan link ujian atau klik tombol &ldquo;Uji Soal (Siswa)&rdquo; di atas untuk melakukan simulasi.
-            </p>
+          <div className="p-12 text-center text-slate-400 space-y-3">
+            <FileSpreadsheet className="w-12 h-12 mx-auto text-slate-300" />
+            <div>
+              <p className="text-sm font-semibold text-slate-600">Belum ada data pengerjaan ujian untuk kuis ini</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                Hasil pengerjaan mahasiswa akan otomatis muncul di sini secara real-time. Klik tombol di bawah untuk menyinkronkan data dari Cloud Server.
+              </p>
+            </div>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleManualRefresh}
+                disabled={isRefreshing}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold inline-flex items-center gap-2 shadow-xs transition cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span>{isRefreshing ? 'Memeriksa Data...' : 'Sinkronkan & Muat Ulang'}</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="overflow-x-auto">

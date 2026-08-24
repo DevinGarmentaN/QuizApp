@@ -85,6 +85,7 @@ interface QuizContextType {
   submitQuizResult: (submission: QuizSubmission) => Promise<void>;
   deleteSubmission: (submissionId: string) => Promise<void>;
   clearQuizSubmissions: (quizId: string) => Promise<void>;
+  refreshSubmissions: () => Promise<number>;
   
   // Reset & Imports
   resetToDefaultData: () => void;
@@ -240,7 +241,27 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
             cloudSubmissions.push(data);
           }
         });
-        setSubmissions(cloudSubmissions);
+        
+        // Merge cloudSubmissions with local state to preserve submissions even if cloud query was limited
+        setSubmissions((prev) => {
+          const mergedMap = new Map<string, QuizSubmission>();
+          // 1. Add current local submissions
+          prev.forEach((s) => {
+            if (s && s.id && !DUMMY_SUBMISSION_IDS.has(s.id)) {
+              mergedMap.set(s.id, s);
+            }
+          });
+          // 2. Overlay / add cloud submissions
+          cloudSubmissions.forEach((s) => {
+            if (s && s.id && !DUMMY_SUBMISSION_IDS.has(s.id)) {
+              mergedMap.set(s.id, s);
+            }
+          });
+          const mergedList = Array.from(mergedMap.values()).sort(
+            (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+          );
+          return mergedList;
+        });
         setIsCloudSynced(true);
       },
       (error) => {
@@ -263,9 +284,13 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   fallbackList.push(data);
                 }
               });
-              fallbackList.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
               if (fallbackList.length > 0) {
-                setSubmissions(fallbackList);
+                setSubmissions((prev) => {
+                  const map = new Map<string, QuizSubmission>();
+                  prev.forEach((s) => map.set(s.id, s));
+                  fallbackList.forEach((s) => map.set(s.id, s));
+                  return Array.from(map.values()).sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+                });
                 setIsCloudSynced(true);
               }
             })
@@ -767,8 +792,23 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Submit Result directly to Firebase Cloud Firestore for instant cross-device synchronization
   const submitQuizResult = async (submission: QuizSubmission) => {
-    // 1. Optimistic local update
-    setSubmissions((prev) => [submission, ...prev.filter((s) => s.id !== submission.id)]);
+    // 1. Optimistic local state and localStorage update
+    setSubmissions((prev) => {
+      const mergedMap = new Map<string, QuizSubmission>();
+      mergedMap.set(submission.id, submission);
+      prev.forEach((s) => {
+        if (s && s.id !== submission.id) {
+          mergedMap.set(s.id, s);
+        }
+      });
+      const updated = Array.from(mergedMap.values());
+      try {
+        localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Failed saving submission to storage', e);
+      }
+      return updated;
+    });
 
     // 2. Persist to Firestore
     try {
@@ -776,9 +816,79 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const sanitized = sanitizeForFirestore(submission);
       const submissionDocRef = doc(db, 'submissions', submission.id);
       await setDoc(submissionDocRef, sanitized);
+      console.log('Quiz submission persisted to Firestore successfully:', submission.id);
     } catch (err) {
       console.warn('Could not persist quiz submission to Firebase Firestore (stored locally):', err);
     }
+  };
+
+  const refreshSubmissions = async (): Promise<number> => {
+    let count = 0;
+    try {
+      const submissionsRef = collection(db, 'submissions');
+      const snap = await getDocs(query(submissionsRef, limit(100)));
+      const cloudList: QuizSubmission[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as QuizSubmission;
+        if (data && !DUMMY_SUBMISSION_IDS.has(data.id)) {
+          cloudList.push(data);
+        }
+      });
+
+      setSubmissions((prev) => {
+        const map = new Map<string, QuizSubmission>();
+        // Keep existing local submissions
+        try {
+          const cached = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
+          if (cached) {
+            const parsed = JSON.parse(cached) as QuizSubmission[];
+            if (Array.isArray(parsed)) {
+              parsed.forEach((s) => {
+                if (s && !DUMMY_SUBMISSION_IDS.has(s.id)) map.set(s.id, s);
+              });
+            }
+          }
+        } catch (e) {
+          console.warn(e);
+        }
+
+        prev.forEach((s) => {
+          if (s && !DUMMY_SUBMISSION_IDS.has(s.id)) map.set(s.id, s);
+        });
+
+        cloudList.forEach((s) => {
+          if (s && !DUMMY_SUBMISSION_IDS.has(s.id)) map.set(s.id, s);
+        });
+
+        const merged = Array.from(map.values()).sort(
+          (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+        );
+        count = merged.length;
+        try {
+          localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(merged));
+        } catch (e) {
+          console.warn(e);
+        }
+        return merged;
+      });
+      setIsCloudSynced(true);
+    } catch (e) {
+      console.warn('Manual refresh submissions from cloud noticed:', e);
+      // At least restore from localStorage
+      try {
+        const cached = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
+        if (cached) {
+          const parsed = JSON.parse(cached) as QuizSubmission[];
+          if (Array.isArray(parsed)) {
+            setSubmissions(parsed.filter((s) => s && !DUMMY_SUBMISSION_IDS.has(s.id)));
+            count = parsed.length;
+          }
+        }
+      } catch (err) {
+        console.warn(err);
+      }
+    }
+    return count;
   };
 
   const deleteSubmission = async (submissionId: string) => {
@@ -953,6 +1063,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         submitQuizResult,
         deleteSubmission,
         clearQuizSubmissions,
+        refreshSubmissions,
         resetToDefaultData,
         importQuizJson,
       }}
