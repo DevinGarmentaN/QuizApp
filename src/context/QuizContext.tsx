@@ -91,6 +91,7 @@ interface QuizContextType {
 
 const STORAGE_KEY_QUIZZES = 'flexitest_quizzes_v2';
 const STORAGE_KEY_AUTH = 'flexitest_auth_user_v1';
+const STORAGE_KEY_ACTIVE_QUIZ = 'flexitest_active_quiz_id_v2';
 const DUMMY_SUBMISSION_IDS = new Set(['sub-1', 'sub-2', 'sub-3', 'sub-4', 'sub-5', 'sub-6']);
 
 // Helper to sanitize data by removing undefined fields for Firebase Firestore
@@ -128,7 +129,21 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [submissions, setSubmissions] = useState<QuizSubmission[]>([]);
-  const [activeQuizId, setActiveQuizId] = useState<string>(DEFAULT_DATABASE_QUIZ.id);
+  const [activeQuizId, setActiveQuizIdState] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_ACTIVE_QUIZ);
+      if (saved) return saved;
+    } catch (e) {}
+    return DEFAULT_DATABASE_QUIZ.id;
+  });
+
+  const setActiveQuizId = (id: string) => {
+    setActiveQuizIdState(id);
+    try {
+      localStorage.setItem(STORAGE_KEY_ACTIVE_QUIZ, id);
+    } catch (e) {}
+  };
+
   const [activeTab, setActiveTab] = useState<'create' | 'configure' | 'publish' | 'analyze' | 'preview'>('create');
   const [appMode, setAppMode] = useState<'admin' | 'taker'>('admin');
   const [takingQuizId, setTakingQuizId] = useState<string | null>(null);
@@ -180,7 +195,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  // Sync Quizzes from Cloud Firestore so quizzes created on one device appear everywhere
+  // Sync Quizzes from Cloud Firestore so quizzes created or edited appear instantly on all devices
   useEffect(() => {
     const quizzesRef = collection(db, 'quizzes');
     let isInitialLoad = true;
@@ -188,11 +203,6 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = onSnapshot(
       quizzesRef,
       (snapshot) => {
-        // If snapshot comes from a pending local write, skip replacing local state to avoid race condition
-        if (snapshot.metadata.hasPendingWrites) {
-          return;
-        }
-
         if (!snapshot.empty) {
           const cloudQuizzes: Quiz[] = [];
           snapshot.forEach((docSnap) => {
@@ -202,7 +212,17 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           });
           if (cloudQuizzes.length > 0) {
+            // Sort by updatedAt descending so newly edited quizzes stay on top
+            cloudQuizzes.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
             setQuizzes(cloudQuizzes);
+
+            // Keep activeQuizId valid
+            setActiveQuizIdState((currentId) => {
+              if (cloudQuizzes.some((q) => q.id === currentId)) {
+                return currentId;
+              }
+              return cloudQuizzes[0].id;
+            });
           }
         } else if (isInitialLoad) {
           // If Firestore quizzes collection is empty, seed initial default quizzes to cloud
@@ -240,7 +260,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await ensureAuth();
       const sanitized = sanitizeForFirestore(quizToSave);
-      await setDoc(doc(db, 'quizzes', quizToSave.id), sanitized);
+      await setDoc(doc(db, 'quizzes', quizToSave.id), sanitized, { merge: true });
     } catch (e) {
       console.error('Could not persist quiz to Firestore:', e);
     }

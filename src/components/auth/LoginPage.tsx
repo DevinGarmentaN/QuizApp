@@ -42,6 +42,12 @@ export const LoginPage: React.FC = () => {
   // Student quick test field
   const [selectedQuizId, setSelectedQuizId] = useState<string>(quizzes[0]?.id || '');
   const [studentAccessCode, setStudentAccessCode] = useState('');
+
+  React.useEffect(() => {
+    if ((!selectedQuizId || !quizzes.some((q) => q.id === selectedQuizId)) && quizzes.length > 0) {
+      setSelectedQuizId(quizzes[0].id);
+    }
+  }, [quizzes, selectedQuizId]);
   
   // Feedback states
   const [errorMessage, setErrorMessage] = useState('');
