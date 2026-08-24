@@ -316,36 +316,16 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           });
 
-          // Check if quiz-db-14 in cloud has fewer questions than the 25-question default
+          // Ensure DEFAULT_DATABASE_QUIZ exists if not present in collection
           const dbQuizIdx = cloudQuizzes.findIndex((q) => q.id === DEFAULT_DATABASE_QUIZ.id);
-          if (dbQuizIdx >= 0) {
-            if (cloudQuizzes[dbQuizIdx].questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
-              cloudQuizzes[dbQuizIdx] = {
-                ...DEFAULT_DATABASE_QUIZ,
-                ...cloudQuizzes[dbQuizIdx],
-                questions: DEFAULT_DATABASE_QUIZ.questions,
-              };
-              persistQuizToCloud(cloudQuizzes[dbQuizIdx]);
-            }
-          } else {
-            // Seed DEFAULT_DATABASE_QUIZ if not present in collection
+          if (dbQuizIdx === -1) {
             cloudQuizzes.unshift(DEFAULT_DATABASE_QUIZ);
             persistQuizToCloud(DEFAULT_DATABASE_QUIZ);
           }
 
-          // Check if quiz-1787487557515 (DA) in cloud has fewer questions or is missing
+          // Ensure DEFAULT_DA_QUIZ exists if not present in collection
           const daQuizIdx = cloudQuizzes.findIndex((q) => q.id === DEFAULT_DA_QUIZ.id);
-          if (daQuizIdx >= 0) {
-            if (cloudQuizzes[daQuizIdx].questions.length < DEFAULT_DA_QUIZ.questions.length) {
-              cloudQuizzes[daQuizIdx] = {
-                ...DEFAULT_DA_QUIZ,
-                ...cloudQuizzes[daQuizIdx],
-                questions: DEFAULT_DA_QUIZ.questions,
-              };
-              persistQuizToCloud(cloudQuizzes[daQuizIdx]);
-            }
-          } else {
-            // Seed DEFAULT_DA_QUIZ if not present in collection
+          if (daQuizIdx === -1) {
             cloudQuizzes.splice(1, 0, DEFAULT_DA_QUIZ);
             persistQuizToCloud(DEFAULT_DA_QUIZ);
           }

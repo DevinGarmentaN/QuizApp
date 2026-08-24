@@ -87,18 +87,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
         if (docSnap.exists()) {
           const data = docSnap.data() as Quiz;
           if (data && data.id) {
-            // Check if DEFAULT_DATABASE_QUIZ or DEFAULT_DA_QUIZ needs to be updated to 25 questions
-            if (data.id === DEFAULT_DATABASE_QUIZ.id && data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
-              const merged = { ...DEFAULT_DATABASE_QUIZ, ...data, questions: DEFAULT_DATABASE_QUIZ.questions };
-              setCloudQuiz(merged);
-              persistQuizToCloud(merged);
-            } else if (data.id === DEFAULT_DA_QUIZ.id && data.questions.length < DEFAULT_DA_QUIZ.questions.length) {
-              const merged = { ...DEFAULT_DA_QUIZ, ...data, questions: DEFAULT_DA_QUIZ.questions };
-              setCloudQuiz(merged);
-              persistQuizToCloud(merged);
-            } else {
-              setCloudQuiz(data);
-            }
+            setCloudQuiz(data);
             setIsLoadingQuiz(false);
           }
         } else {
@@ -187,15 +176,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
           .then((snap) => {
             if (snap.exists()) {
               const data = snap.data() as Quiz;
-              if (data.id === DEFAULT_DATABASE_QUIZ.id && data.questions.length < DEFAULT_DATABASE_QUIZ.questions.length) {
-                const merged = { ...DEFAULT_DATABASE_QUIZ, ...data, questions: DEFAULT_DATABASE_QUIZ.questions };
-                setCloudQuiz(merged);
-              } else if (data.id === DEFAULT_DA_QUIZ.id && data.questions.length < DEFAULT_DA_QUIZ.questions.length) {
-                const merged = { ...DEFAULT_DA_QUIZ, ...data, questions: DEFAULT_DA_QUIZ.questions };
-                setCloudQuiz(merged);
-              } else {
-                setCloudQuiz(data);
-              }
+              setCloudQuiz(data);
             } else {
               const localMem = quizzes.find((q) => q.id === quizId);
               if (localMem) {
