@@ -138,7 +138,7 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
         }
       },
       (error) => {
-        console.warn('Real-time quiz fetch warning:', error);
+        console.warn('Real-time quiz fetch warning:', error?.message || error);
         if (!isMounted) return;
         const localFallback = quizzes.find((q) => q.id === quizId);
         if (localFallback) {
@@ -156,7 +156,33 @@ export const QuizPlayer: React.FC<QuizPlayerProps> = ({ quizId, onExit }) => {
           setIsLoadingQuiz(false);
           return;
         }
-        // Try fallback getDoc
+
+        const isQuota =
+          error?.code === 'resource-exhausted' ||
+          error?.message?.toLowerCase().includes('quota') ||
+          error?.toString()?.toLowerCase().includes('quota');
+
+        if (isQuota) {
+          // In quota exceeded, check local storage directly
+          try {
+            const saved = localStorage.getItem('flexitest_quizzes_v2');
+            if (saved) {
+              const list = JSON.parse(saved) as Quiz[];
+              const storageFallback = list.find((q) => q.id === quizId);
+              if (storageFallback) {
+                setCloudQuiz(storageFallback);
+                setIsLoadingQuiz(false);
+                return;
+              }
+            }
+          } catch (e) {
+            console.warn(e);
+          }
+          setIsLoadingQuiz(false);
+          return;
+        }
+
+        // Try fallback getDoc for non-quota errors
         getDoc(quizDocRef)
           .then((snap) => {
             if (snap.exists()) {

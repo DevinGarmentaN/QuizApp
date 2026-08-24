@@ -7,6 +7,7 @@ import {
   onSnapshot,
   query,
   orderBy,
+  limit,
   getDocs,
   writeBatch
 } from 'firebase/firestore';
@@ -91,6 +92,7 @@ interface QuizContextType {
 }
 
 const STORAGE_KEY_QUIZZES = 'flexitest_quizzes_v2';
+const STORAGE_KEY_SUBMISSIONS = 'flexitest_submissions_v2';
 const STORAGE_KEY_AUTH = 'flexitest_auth_user_v1';
 const DUMMY_SUBMISSION_IDS = new Set(['sub-1', 'sub-2', 'sub-3', 'sub-4', 'sub-5', 'sub-6']);
 
@@ -166,7 +168,20 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return [DEFAULT_DATABASE_QUIZ, DEFAULT_DA_QUIZ, SAMPLE_MULTI_TYPE_QUIZ];
   });
 
-  const [submissions, setSubmissions] = useState<QuizSubmission[]>([]);
+  const [submissions, setSubmissions] = useState<QuizSubmission[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
+      if (saved) {
+        const parsed = JSON.parse(saved) as QuizSubmission[];
+        if (Array.isArray(parsed)) {
+          return parsed.filter((s) => s && !DUMMY_SUBMISSION_IDS.has(s.id));
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load local submissions cache', e);
+    }
+    return [];
+  });
   const [activeQuizId, setActiveQuizId] = useState<string>(DEFAULT_DATABASE_QUIZ.id);
   const [activeTab, setActiveTab] = useState<'create' | 'configure' | 'publish' | 'analyze' | 'preview'>('create');
   const [appMode, setAppMode] = useState<'admin' | 'taker'>(initialUrlQuizId ? 'taker' : 'admin');
@@ -196,10 +211,19 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Sync Submissions from Cloud Firestore in Real-time across all devices!
+  // Save submissions to local storage whenever updated
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_SUBMISSIONS, JSON.stringify(submissions));
+    } catch (e) {
+      console.warn('Failed to save submissions to local cache', e);
+    }
+  }, [submissions]);
+
+  // Sync Submissions from Cloud Firestore in Real-time across all devices with limits and quota safety!
   useEffect(() => {
     const submissionsRef = collection(db, 'submissions');
-    const q = query(submissionsRef, orderBy('submittedAt', 'desc'));
+    const q = query(submissionsRef, orderBy('submittedAt', 'desc'), limit(100));
 
     const unsubscribe = onSnapshot(
       q,
@@ -215,22 +239,35 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsCloudSynced(true);
       },
       (error) => {
-        console.error('Real-time submissions sync error:', error);
-        // Fallback gracefully to read collection directly if index sorting encounters issue
-        getDocs(submissionsRef).then((snap) => {
-          const fallbackList: QuizSubmission[] = [];
-          snap.forEach((d) => {
-            const data = d.data() as QuizSubmission;
-            if (data && !DUMMY_SUBMISSION_IDS.has(data.id)) {
-              fallbackList.push(data);
-            }
-          });
-          fallbackList.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
-          setSubmissions(fallbackList);
-          setIsCloudSynced(true);
-        }).catch((err) => {
-          console.warn('Fallback submissions query failed:', err);
-        });
+        const isQuota =
+          error?.code === 'resource-exhausted' ||
+          error?.message?.toLowerCase().includes('quota') ||
+          error?.toString()?.toLowerCase().includes('quota');
+
+        if (isQuota) {
+          console.warn('Firestore submissions sync using offline/cached mode (Quota limit reached).');
+        } else {
+          console.warn('Real-time submissions sync notice:', error?.message || error);
+          // Fallback query without index ordering only if not quota-related
+          getDocs(query(submissionsRef, limit(50)))
+            .then((snap) => {
+              const fallbackList: QuizSubmission[] = [];
+              snap.forEach((d) => {
+                const data = d.data() as QuizSubmission;
+                if (data && !DUMMY_SUBMISSION_IDS.has(data.id)) {
+                  fallbackList.push(data);
+                }
+              });
+              fallbackList.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+              if (fallbackList.length > 0) {
+                setSubmissions(fallbackList);
+                setIsCloudSynced(true);
+              }
+            })
+            .catch(() => {
+              // Gracefully continue with local storage data
+            });
+        }
       }
     );
 
@@ -245,7 +282,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await setDoc(doc(db, 'quizzes', quizToSave.id), sanitized, { merge: true });
       return true;
     } catch (e) {
-      console.error('Could not persist quiz to Firestore:', e);
+      console.warn('Could not persist quiz to Firestore (local cache retained):', e);
       return false;
     }
   };
@@ -259,10 +296,11 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Sync Quizzes from Cloud Firestore so quizzes created on one device appear everywhere
   useEffect(() => {
     const quizzesRef = collection(db, 'quizzes');
+    const q = query(quizzesRef, limit(50));
     let isInitialLoad = true;
 
     const unsubscribe = onSnapshot(
-      quizzesRef,
+      q,
       (snapshot) => {
         // If snapshot comes from a pending local write, skip replacing local state to avoid race condition
         if (snapshot.metadata.hasPendingWrites) {
@@ -333,7 +371,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
               await persistQuizToCloud(DEFAULT_DA_QUIZ);
               await persistQuizToCloud(SAMPLE_MULTI_TYPE_QUIZ);
             } catch (err) {
-              console.warn('Error seeding default quizzes to Firestore:', err);
+              console.warn('Notice seeding default quizzes to Firestore:', err);
             }
           };
           seedBatch();
@@ -341,7 +379,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isInitialLoad = false;
       },
       (error) => {
-        console.warn('Quizzes sync warning:', error);
+        console.warn('Quizzes sync notice (local mode active):', error?.message || error);
       }
     );
 
@@ -744,7 +782,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const submissionDocRef = doc(db, 'submissions', submission.id);
       await setDoc(submissionDocRef, sanitized);
     } catch (err) {
-      console.error('Error submitting quiz result to Firebase Firestore:', err);
+      console.warn('Could not persist quiz submission to Firebase Firestore (stored locally):', err);
     }
   };
 
